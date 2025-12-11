@@ -1,102 +1,92 @@
 import { NextRequest, NextResponse } from "next/server";
-import { connectDB } from "@/lib/db";     // 👈 usa tu helper existente
-import Booking from "@/lib/models/Booking"; // 👈 modelo que creamos
+import { connectDB } from "@/lib/db";
+import Booking from "@/lib/models/Booking";
 
-// GET /api/bookings?date=YYYY-MM-DD
-export async function GET(req: NextRequest) {
+// ✅ Next (en tu build) espera params como Promise
+type Ctx = { params: Promise<{ id: string }> };
+
+export async function GET(_req: NextRequest, context: Ctx) {
   try {
     await connectDB();
+    const { id } = await context.params;
 
-    const { searchParams } = new URL(req.url);
-    const date = searchParams.get("date");
-
-    const query: any = {};
-    if (date) {
-      query.date = date; // guardamos date como string, así que filtramos directo
+    const booking = await Booking.findById(id);
+    if (!booking) {
+      return NextResponse.json(
+        { message: "Cita no encontrada" },
+        { status: 404 }
+      );
     }
 
-    const bookings = await Booking.find(query)
-      .sort({ date: 1, startTime: 1 })
-      .lean();
-
-    return NextResponse.json(bookings);
-  } catch (err: any) {
-    console.error("GET /api/bookings error:", err);
+    return NextResponse.json(booking);
+  } catch (err) {
+    console.error("GET /api/bookings/[id] error:", err);
     return NextResponse.json(
-      { message: err.message || "Error al obtener reservas" },
+      { message: "Error al cargar la cita" },
       { status: 500 }
     );
   }
 }
 
-// POST /api/bookings  -> crear reserva (pantalla de cliente)
-export async function POST(req: NextRequest) {
+export async function PATCH(req: NextRequest, context: Ctx) {
   try {
     await connectDB();
-    const body = await req.json();
+    const { id } = await context.params;
 
-    const {
-      date,
-      startTime,
-      endTime,
-      serviceType,
-      customerName,
-      customerPhone,
-      notes,
-    } = body;
+    const body = await req.json().catch(() => ({}));
 
-    if (
-      !date ||
-      !startTime ||
-      !endTime ||
-      !serviceType ||
-      !customerName ||
-      !customerPhone
-    ) {
+    // Permite ajustar campos típicos (seguro)
+    const allowed: any = {};
+    if (body.date) allowed.date = body.date;
+    if (body.startTime) allowed.startTime = body.startTime;
+    if (body.endTime) allowed.endTime = body.endTime;
+    if (body.serviceType) allowed.serviceType = body.serviceType;
+    if (body.customerName) allowed.customerName = body.customerName;
+    if (body.customerPhone) allowed.customerPhone = body.customerPhone;
+    if (typeof body.notes !== "undefined") allowed.notes = body.notes;
+
+    // status: reservado | cancelado | confirmado (si lo manejas)
+    if (body.status) allowed.status = body.status;
+
+    const updated = await Booking.findByIdAndUpdate(id, allowed, {
+      new: true,
+    });
+
+    if (!updated) {
       return NextResponse.json(
-        { message: "Faltan datos obligatorios." },
-        { status: 400 }
+        { message: "Cita no encontrada" },
+        { status: 404 }
       );
     }
 
-    // Verificar que no haya una reserva activa en el mismo slot
-    const exists = await Booking.findOne({
-      date,
-      startTime,
-      status: { $ne: "cancelado" },
-    });
-
-    if (exists) {
-      return NextResponse.json(
-        {
-          message: "Ya existe una cita reservada en ese horario.",
-        },
-        { status: 409 }
-      );
-    }
-
-    const booking = await Booking.create({
-      date,
-      startTime,
-      endTime,
-      serviceType,
-      customerName,
-      customerPhone,
-      notes,
-      status: "reservado",
-    });
-
+    return NextResponse.json(updated);
+  } catch (err) {
+    console.error("PATCH /api/bookings/[id] error:", err);
     return NextResponse.json(
-      {
-        message: "Cita creada correctamente",
-        booking,
-      },
-      { status: 201 }
+      { message: "Error al actualizar la cita" },
+      { status: 500 }
     );
-  } catch (err: any) {
-    console.error("POST /api/bookings error:", err);
+  }
+}
+
+export async function DELETE(_req: NextRequest, context: Ctx) {
+  try {
+    await connectDB();
+    const { id } = await context.params;
+
+    const deleted = await Booking.findByIdAndDelete(id);
+    if (!deleted) {
+      return NextResponse.json(
+        { message: "Cita no encontrada" },
+        { status: 404 }
+      );
+    }
+
+    return NextResponse.json({ message: "Cita eliminada" });
+  } catch (err) {
+    console.error("DELETE /api/bookings/[id] error:", err);
     return NextResponse.json(
-      { message: err.message || "Error al crear la cita" },
+      { message: "Error al eliminar la cita" },
       { status: 500 }
     );
   }
