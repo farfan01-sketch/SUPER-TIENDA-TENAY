@@ -147,7 +147,6 @@ export async function POST(req: NextRequest) {
     }));
 
     const cut = await CashCut.create({
-      
       rangeStart: from,
       rangeEnd: to,
       openingAmount,

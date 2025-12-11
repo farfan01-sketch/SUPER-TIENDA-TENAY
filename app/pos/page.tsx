@@ -96,7 +96,7 @@ export default function PosPage() {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [discount, setDiscount] = useState<number>(0);
   const [onlineOrderId, setOnlineOrderId] =
-  useState<string | null>(null);
+    useState<string | null>(null);
 
   // 🔎 Búsqueda / código de barras
   const [searchTerm, setSearchTerm] = useState("");
@@ -116,12 +116,10 @@ export default function PosPage() {
   const [savingSale, setSavingSale] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const [lastSaleId, setLastSaleId] = useState<string | null>(
+  const [lastSaleId, setLastSaleId] = useState<string | null>(null);
+  const [lastSaleFolio, setLastSaleFolio] = useState<string | null>(
     null
   );
-  const [lastSaleFolio, setLastSaleFolio] = useState<
-    string | null
-  >(null);
 
   // 👤 Info del cajero (desde cookie sessionUser)
   const [sessionUser, setSessionUser] =
@@ -171,8 +169,7 @@ export default function PosPage() {
     try {
       setLoadingProducts(true);
       const res = await fetch("/api/products");
-      if (!res.ok)
-        throw new Error("No se pudieron cargar productos");
+      if (!res.ok) throw new Error("No se pudieron cargar productos");
       const data = await res.json();
       setProducts(data);
     } catch (e: any) {
@@ -186,16 +183,12 @@ export default function PosPage() {
     try {
       setLoadingCustomers(true);
       const res = await fetch("/api/customers");
-      if (!res.ok)
-        throw new Error("No se pudieron cargar clientes");
+      if (!res.ok) throw new Error("No se pudieron cargar clientes");
       const data = await res.json();
       setCustomers(data);
     } catch (e: any) {
       setError(
-        (prev) =>
-          prev ||
-          e.message ||
-          "Error al cargar clientes (crédito)"
+        (prev) => prev || e.message || "Error al cargar clientes (crédito)"
       );
     } finally {
       setLoadingCustomers(false);
@@ -208,9 +201,7 @@ export default function PosPage() {
   }, []);
 
   useEffect(() => {
-    const c = customers.find(
-      (cu) => cu._id === selectedCustomerId
-    );
+    const c = customers.find((cu) => cu._id === selectedCustomerId);
     setSelectedCustomer(c || null);
   }, [selectedCustomerId, customers]);
 
@@ -243,8 +234,7 @@ export default function PosPage() {
       payments
         .filter(
           (p) =>
-            p.method &&
-            p.method.toLowerCase() === "crédito"
+            p.method && p.method.toLowerCase() === "crédito"
         )
         .reduce(
           (acc, p) => acc + Number(p.amount || 0),
@@ -255,9 +245,7 @@ export default function PosPage() {
 
   const cashRow = useMemo(
     () =>
-      payments.find(
-        (p) => p.method === "Efectivo"
-      ) || null,
+      payments.find((p) => p.method === "Efectivo") || null,
     [payments]
   );
 
@@ -275,8 +263,7 @@ export default function PosPage() {
   // Cambio solo cuando hay efectivo
   const change = useMemo(() => {
     if (!cashRow) return 0;
-    const expectedCash =
-      Number(total || 0) - nonCashTotal;
+    const expectedCash = Number(total || 0) - nonCashTotal;
     if (cashRow.amount <= expectedCash) return 0;
     return cashRow.amount - expectedCash;
   }, [cashRow, nonCashTotal, total]);
@@ -317,9 +304,7 @@ export default function PosPage() {
       }
 
       // Luego por SKU exacto
-      const bySku = products.find(
-        (p) => p.sku === code
-      );
+      const bySku = products.find((p) => p.sku === code);
       if (bySku) {
         addProductToCart(bySku);
         setSearchTerm("");
@@ -328,10 +313,7 @@ export default function PosPage() {
     }
   }
 
-  function addProductToCart(
-    product: Product,
-    variant?: Variant
-  ) {
+  function addProductToCart(product: Product, variant?: Variant) {
     clearMessages();
 
     const price =
@@ -344,8 +326,7 @@ export default function PosPage() {
       if (variant.size) parts.push(`Talla: ${variant.size}`);
       if (variant.color) parts.push(`Color: ${variant.color}`);
       if (variant.tone) parts.push(`Tono: ${variant.tone}`);
-      if (variant.scent)
-        parts.push(`Aroma: ${variant.scent}`);
+      if (variant.scent) parts.push(`Aroma: ${variant.scent}`);
       return parts.join(" · ");
     })();
 
@@ -383,10 +364,7 @@ export default function PosPage() {
     });
   }
 
-  function updateCartQuantity(
-    index: number,
-    newQty: number
-  ) {
+  function updateCartQuantity(index: number, newQty: number) {
     if (newQty <= 0) {
       setCart((prev) => prev.filter((_, i) => i !== index));
       return;
@@ -416,10 +394,7 @@ export default function PosPage() {
     setSearchTerm("");
   }
 
-  function updatePaymentMethod(
-    index: number,
-    method: string
-  ) {
+  function updatePaymentMethod(index: number, method: string) {
     setPayments((prev) => {
       const copy = [...prev];
       copy[index] = {
@@ -430,10 +405,7 @@ export default function PosPage() {
     });
   }
 
-  function updatePaymentAmount(
-    index: number,
-    amount: number
-  ) {
+  function updatePaymentAmount(index: number, amount: number) {
     setPayments((prev) => {
       const copy = [...prev];
       copy[index] = {
@@ -453,9 +425,7 @@ export default function PosPage() {
 
   function removePaymentRow(index: number) {
     setPayments((prev) =>
-      prev.length <= 1
-        ? prev
-        : prev.filter((_, i) => i !== index)
+      prev.length <= 1 ? prev : prev.filter((_, i) => i !== index)
     );
   }
 
@@ -488,9 +458,7 @@ export default function PosPage() {
       setError(
         `La suma de las formas de pago (${formatMoney(
           totalPayments
-        )}) no coincide con el total (${formatMoney(
-          total
-        )}).`
+        )}) no coincide con el total (${formatMoney(total)}).`
       );
       return;
     }
@@ -532,7 +500,7 @@ export default function PosPage() {
         );
       }
 
-            setLastSaleId(data.sale?._id || null);
+      setLastSaleId(data.sale?._id || null);
       setLastSaleFolio(data.sale?.folio || null);
 
       if (creditAmount > 0 && selectedCustomer) {
@@ -551,7 +519,7 @@ export default function PosPage() {
         );
       }
 
-      // 🔹 NUEVO: si esta venta viene de un pedido en línea, márcalo como "processed"
+      // 🔹 Si esta venta viene de un pedido en línea, márcalo como "processed"
       if (onlineOrderId && data.sale?._id) {
         try {
           await fetch("/api/online-orders", {
@@ -573,12 +541,6 @@ export default function PosPage() {
         } finally {
           setOnlineOrderId(null);
         }
-      }
-
-      resetSale();
-      await loadProducts();
-      if (creditAmount > 0) {
-        await loadCustomers();
       }
 
       resetSale();
@@ -610,7 +572,8 @@ export default function PosPage() {
     }
 
     window.addEventListener("keydown", handleKey);
-    return () => window.removeEventListener("keydown", handleKey);
+    return () =>
+      window.removeEventListener("keydown", handleKey);
   }, []);
 
   // 🔄 Cargar borrador de pedido en línea desde localStorage
@@ -674,7 +637,7 @@ export default function PosPage() {
         return;
       }
 
-            // Cargar carrito con el pedido de la tienda
+      // Cargar carrito con el pedido de la tienda
       setCart(mapped);
       setDiscount(0);
       setPayments([{ method: "Efectivo", amount: 0 }]);
@@ -693,9 +656,7 @@ export default function PosPage() {
     } finally {
       // Limpia para que no se vuelva a cargar al refrescar
       if (typeof window !== "undefined") {
-        window.localStorage.removeItem(
-          "posOnlineOrderDraft"
-        );
+        window.localStorage.removeItem("posOnlineOrderDraft");
       }
     }
   }, []);
@@ -786,6 +747,13 @@ export default function PosPage() {
               >
                 Corte de caja
               </Link>
+              {/* 🔗 Reservas */}
+              <Link
+                href="/admin/reservas"
+                className="rounded-full bg-slate-100 px-3 py-1 text-[11px] font-semibold text-slate-700 shadow-sm hover:bg-slate-200"
+              >
+                Reservas
+              </Link>
               {/* 🔗 Pedidos en línea */}
               <Link
                 href="/admin/online-orders"
@@ -853,9 +821,7 @@ export default function PosPage() {
               placeholder="Buscar por nombre, SKU o escanear código de barras..."
               className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-xs outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
               value={searchTerm}
-              onChange={(e) =>
-                setSearchTerm(e.target.value)
-              }
+              onChange={(e) => setSearchTerm(e.target.value)}
               onKeyDown={handleSearchKeyDown}
             />
           </div>
@@ -867,8 +833,7 @@ export default function PosPage() {
               </div>
             ) : filteredProducts.length === 0 ? (
               <div className="flex-1 flex items-center justify-center text-xs text-slate-500">
-                No hay productos que coincidan con la
-                búsqueda.
+                No hay productos que coincidan con la búsqueda.
               </div>
             ) : (
               <div className="grid grid-cols-2 gap-3 overflow-auto pr-1 md:grid-cols-3">
@@ -904,60 +869,47 @@ export default function PosPage() {
                             </div>
                           )}
                           <div className="text-[11px] font-semibold text-emerald-700">
-                            {formatMoney(
-                              p.priceRetail ?? 0
-                            )}
+                            {formatMoney(p.priceRetail ?? 0)}
                           </div>
                         </div>
                       </div>
 
                       {hasVariants ? (
                         <div className="mt-1 space-y-1">
-                          {(p.variants || []).map(
-                            (v, idx) => {
-                              const vt = [];
-                              if (v.size)
-                                vt.push(`T${v.size}`);
-                              if (v.color)
-                                vt.push(v.color);
-                              if (v.tone) vt.push(v.tone);
-                              if (v.scent)
-                                vt.push(v.scent);
-                              const vLabel =
-                                vt.join(" / ") ||
-                                "Variante";
+                          {(p.variants || []).map((v, idx) => {
+                            const vt = [];
+                            if (v.size) vt.push(`T${v.size}`);
+                            if (v.color) vt.push(v.color);
+                            if (v.tone) vt.push(v.tone);
+                            if (v.scent) vt.push(v.scent);
+                            const vLabel =
+                              vt.join(" / ") || "Variante";
 
-                              return (
-                                <button
-                                  key={idx}
-                                  type="button"
-                                  onClick={() =>
-                                    addProductToCart(
-                                      p,
-                                      v
-                                    )
-                                  }
-                                  className="w-full rounded-lg border border-slate-200 px-2 py-1 text-[10px] text-left hover:bg-slate-50 flex items-center justify-between"
-                                >
-                                  <span>{vLabel}</span>
-                                  <span className="font-semibold text-emerald-700">
-                                    {formatMoney(
-                                      v.priceRetail ||
-                                        p.priceRetail ||
-                                        0
-                                    )}
-                                  </span>
-                                </button>
-                              );
-                            }
-                          )}
+                            return (
+                              <button
+                                key={idx}
+                                type="button"
+                                onClick={() =>
+                                  addProductToCart(p, v)
+                                }
+                                className="w-full rounded-lg border border-slate-200 px-2 py-1 text-[10px] text-left hover:bg-slate-50 flex items-center justify-between"
+                              >
+                                <span>{vLabel}</span>
+                                <span className="font-semibold text-emerald-700">
+                                  {formatMoney(
+                                    v.priceRetail ||
+                                      p.priceRetail ||
+                                      0
+                                  )}
+                                </span>
+                              </button>
+                            );
+                          })}
                         </div>
                       ) : (
                         <button
                           type="button"
-                          onClick={() =>
-                            addProductToCart(p)
-                          }
+                          onClick={() => addProductToCart(p)}
                           className="mt-2 w-full rounded-lg bg-slate-900 px-2 py-1.5 text-[10px] font-semibold text-white shadow hover:bg-slate-800"
                         >
                           Añadir
@@ -987,18 +939,10 @@ export default function PosPage() {
               <table className="min-w-full text-[11px]">
                 <thead>
                   <tr className="border-b border-slate-200 text-slate-500">
-                    <th className="px-1 py-1 text-left">
-                      Producto
-                    </th>
-                    <th className="px-1 py-1 text-center">
-                      Cant
-                    </th>
-                    <th className="px-1 py-1 text-right">
-                      P. Unit
-                    </th>
-                    <th className="px-1 py-1 text-right">
-                      Importe
-                    </th>
+                    <th className="px-1 py-1 text-left">Producto</th>
+                    <th className="px-1 py-1 text-center">Cant</th>
+                    <th className="px-1 py-1 text-right">P. Unit</th>
+                    <th className="px-1 py-1 text-right">Importe</th>
                     <th className="px-1 py-1" />
                   </tr>
                 </thead>
@@ -1027,9 +971,7 @@ export default function PosPage() {
                           onChange={(e) =>
                             updateCartQuantity(
                               idx,
-                              Number(
-                                e.target.value
-                              )
+                              Number(e.target.value)
                             )
                           }
                         />
@@ -1090,8 +1032,7 @@ export default function PosPage() {
                 </option>
                 {customers.map((c) => (
                   <option key={c._id} value={c._id}>
-                    {c.name}{" "}
-                    {c.phone ? `(${c.phone})` : ""}
+                    {c.name} {c.phone ? `(${c.phone})` : ""}
                   </option>
                 ))}
               </select>
@@ -1100,23 +1041,20 @@ export default function PosPage() {
                   Límite:{" "}
                   <span className="font-semibold">
                     {formatMoney(
-                      selectedCustomer.creditLimit ||
-                        0
+                      selectedCustomer.creditLimit || 0
                     )}
                   </span>{" "}
                   · Saldo actual:{" "}
                   <span className="font-semibold text-red-600">
                     {formatMoney(
-                      selectedCustomer.currentBalance ||
-                        0
+                      selectedCustomer.currentBalance || 0
                     )}
                   </span>
                 </div>
               )}
               {creditAmount > 0 && !selectedCustomer && (
                 <div className="mt-1 text-[10px] text-red-600">
-                  Para usar Crédito debes seleccionar un
-                  cliente.
+                  Para usar Crédito debes seleccionar un cliente.
                 </div>
               )}
             </div>
@@ -1136,9 +1074,7 @@ export default function PosPage() {
                     className="w-20 rounded border border-slate-300 px-2 py-1 text-[11px] text-right outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                     value={discount}
                     onChange={(e) =>
-                      setDiscount(
-                        Number(e.target.value)
-                      )
+                      setDiscount(Number(e.target.value))
                     }
                   />
                 </div>
@@ -1228,16 +1164,12 @@ export default function PosPage() {
               <div className="border-t border-dashed border-slate-200 pt-1 mt-1 text-[11px]">
                 <div className="flex justify-between">
                   <span>Total pagos:</span>
-                  <span>
-                    {formatMoney(totalPayments)}
-                  </span>
+                  <span>{formatMoney(totalPayments)}</span>
                 </div>
                 {cashRow && (
                   <div className="flex justify-between">
                     <span>Cambio (efectivo):</span>
-                    <span>
-                      {formatMoney(change)}
-                    </span>
+                    <span>{formatMoney(change)}</span>
                   </div>
                 )}
               </div>
