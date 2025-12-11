@@ -2,7 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import Booking from "@/lib/models/Booking";
 
-// GET /api/bookings?date=YYYY-MM-DD
+function overlap(aStart: string, aEnd: string, bStart: string, bEnd: string) {
+  // "HH:MM" comparables como string si van con 0 padding
+  return aStart < bEnd && bStart < aEnd;
+}
+
+// GET /api/bookings?date=YYYY-MM-DD  -> lista por fecha
 export async function GET(req: NextRequest) {
   try {
     await connectDB();
@@ -10,30 +15,32 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const date = searchParams.get("date");
 
-    if (!date) {
-      return NextResponse.json(
-        { message: "Falta el parámetro date (YYYY-MM-DD)" },
-        { status: 400 }
-      );
-    }
+    const filter: any = {};
+    if (date) filter.date = date;
 
-    const bookings = await Booking.find({ date }).sort({ startTime: 1 }).lean();
-    return NextResponse.json(bookings, { status: 200 });
-  } catch (err: any) {
+    const bookings = await Booking.find(filter).sort({
+      date: 1,
+      startTime: 1,
+      createdAt: -1,
+    });
+
+    return NextResponse.json(bookings);
+  } catch (err) {
     console.error("GET /api/bookings error:", err);
     return NextResponse.json(
-      { message: err?.message || "Error al cargar citas" },
+      { message: "Error al cargar citas" },
       { status: 500 }
     );
   }
 }
 
-// POST /api/bookings
+// POST /api/bookings -> crear cita
 export async function POST(req: NextRequest) {
   try {
     await connectDB();
 
     const body = await req.json().catch(() => ({}));
+
     const {
       date,
       startTime,
@@ -46,14 +53,23 @@ export async function POST(req: NextRequest) {
 
     if (!date || !startTime || !endTime || !serviceType || !customerName || !customerPhone) {
       return NextResponse.json(
-        { message: "Faltan datos obligatorios para crear la cita" },
+        { message: "Faltan datos obligatorios" },
         { status: 400 }
       );
     }
 
-    const exists = await Booking.findOne({ date, startTime, status: "reservado" }).lean();
-    if (exists) {
-      return NextResponse.json({ message: "Ese horario ya está ocupado" }, { status: 409 });
+    // revisar choque con otra cita reservada
+    const sameDay = await Booking.find({ date, status: "reservado" });
+
+    const conflict = sameDay.some((b: any) =>
+      overlap(startTime, endTime, b.startTime, b.endTime)
+    );
+
+    if (conflict) {
+      return NextResponse.json(
+        { message: "Ese horario ya está ocupado" },
+        { status: 409 }
+      );
     }
 
     const created = await Booking.create({
@@ -67,11 +83,11 @@ export async function POST(req: NextRequest) {
       status: "reservado",
     });
 
-    return NextResponse.json(created.toObject(), { status: 201 });
-  } catch (err: any) {
+    return NextResponse.json(created, { status: 201 });
+  } catch (err) {
     console.error("POST /api/bookings error:", err);
     return NextResponse.json(
-      { message: err?.message || "Error al crear la cita" },
+      { message: "Error al crear la cita" },
       { status: 500 }
     );
   }
