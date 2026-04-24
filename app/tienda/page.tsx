@@ -25,8 +25,7 @@ type CartItem = {
   quantity: number;
 };
 
-// 🔢 WhatsApp de la tienda (ajústalo como necesites, sin espacios ni signos)
-const STORE_WHATSAPP = "529712316195"; // 52 + 9712316195
+const STORE_WHATSAPP = "529712316195";
 
 export default function OnlineStorePage() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -35,10 +34,8 @@ export default function OnlineStorePage() {
   const [search, setSearch] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string>("");
 
-  // 🛒 Carrito
   const [cart, setCart] = useState<CartItem[]>([]);
 
-  // 👤 Datos del cliente
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
   const [customerAddress, setCustomerAddress] = useState("");
@@ -55,6 +52,7 @@ export default function OnlineStorePage() {
       clearMessages();
 
       const res = await fetch("/api/products");
+
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(
@@ -75,21 +73,22 @@ export default function OnlineStorePage() {
     loadProducts();
   }, []);
 
-  // 🔹 Categorías únicas (solo productos activos)
   const categories = useMemo(() => {
     const set = new Set<string>();
+
     products.forEach((p) => {
       const active = p.isActive !== false;
       if (!active) return;
+
       const cat = (p.category || "").trim();
       if (cat) set.add(cat);
     });
+
     return Array.from(set).sort((a, b) =>
       a.localeCompare(b, "es", { sensitivity: "base" })
     );
   }, [products]);
 
-  // 🔹 Productos filtrados por categoría + búsqueda
   const filteredProducts = useMemo(() => {
     const q = search.trim().toLowerCase();
 
@@ -101,6 +100,7 @@ export default function OnlineStorePage() {
         const cat = (p.category || "").trim().toLowerCase();
         if (cat !== selectedCategory.toLowerCase()) return false;
       }
+
       return true;
     });
 
@@ -123,6 +123,7 @@ export default function OnlineStorePage() {
 
   function formatMoney(value: number | undefined | null) {
     const num = Number(value || 0);
+
     return num.toLocaleString("es-MX", {
       style: "currency",
       currency: "MXN",
@@ -130,12 +131,12 @@ export default function OnlineStorePage() {
     });
   }
 
-  // 🛒 Lógica del carrito
   function addToCart(product: Product) {
     setCart((prev) => {
       const existingIndex = prev.findIndex(
         (item) => item.productId === product._id
       );
+
       const price = product.priceRetail || 0;
 
       if (existingIndex >= 0) {
@@ -164,6 +165,7 @@ export default function OnlineStorePage() {
       if (newQty <= 0) {
         return prev.filter((item) => item.productId !== productId);
       }
+
       return prev.map((item) =>
         item.productId === productId
           ? { ...item, quantity: newQty }
@@ -189,9 +191,7 @@ export default function OnlineStorePage() {
     [cart]
   );
 
-  // 🟢 WhatsApp + mensaje
   function cleanPhone(phone: string): string {
-    // Deja solo dígitos
     return phone.replace(/\D/g, "");
   }
 
@@ -209,6 +209,7 @@ export default function OnlineStorePage() {
     }
 
     text += "*Productos:*\n";
+
     cart.forEach((item, index) => {
       const subtotal = item.price * item.quantity;
       text += `${index + 1}. ${item.name} x${
@@ -221,17 +222,18 @@ export default function OnlineStorePage() {
     text += `\n*Total aproximado:* ${formatMoney(cartTotal)}\n\n`;
     text +=
       "Por favor confirma existencias, forma de pago y tiempo de entrega. 🙌";
+
     return text;
   }
 
-    async function sendOrder() {
+  async function sendOrder() {
     if (cart.length === 0) {
       alert("Tu carrito está vacío.");
       return;
     }
 
-    const storePhone = cleanPhone(STORE_WHATSAPP); // WhatsApp de la tienda
-    const custPhoneClean = cleanPhone(customerPhone); // WhatsApp del cliente (si lo captura)
+    const storePhone = cleanPhone(STORE_WHATSAPP);
+    const custPhoneClean = cleanPhone(customerPhone);
 
     if (!storePhone) {
       alert(
@@ -240,13 +242,12 @@ export default function OnlineStorePage() {
       return;
     }
 
-    const text = buildOrderMessage(); // 👈 ya NO usamos encodeURIComponent
+    const text = buildOrderMessage();
 
     try {
       setSendingOrder(true);
 
-      // 1) Guardar pedido en tu backend (igual que antes)
-      await fetch("/api/online-orders", {
+      const orderRes = await fetch("/api/online-orders", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -268,40 +269,40 @@ export default function OnlineStorePage() {
         }),
       });
 
-      // 2) Enviar mensaje a WhatsApp de la TIENDA
+      if (!orderRes.ok) {
+        const orderJson = await orderRes.json().catch(() => ({}));
+        throw new Error(orderJson.message || "No se pudo guardar el pedido");
+      }
+
       const waRes = await fetch("/api/whatsapp/send-order", {
-       method: "POST",
-       headers: { "Content-Type": "application/json" },
-       body: JSON.stringify({ to: storePhone, message: text }),
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to: storePhone, message: text }),
       });
 
       const waJson = await waRes.json().catch(() => ({}));
 
       if (!waRes.ok) {
-       console.error("WhatsApp error:", waJson);
-       alert("Error WhatsApp: " + (waJson?.error || "desconocido"));
-       // Si quieres ver TODO:
-       alert(JSON.stringify(waJson, null, 2));
-       return; // detenemos el flujo
-        }),
-      });
-
-      // 3) Opcional: enviar copia al CLIENTE si puso su número
-      if (custPhoneClean) {
-       const waRes2 = await fetch("/api/whatsapp/send-order", {
-       method: "POST",
-       headers: { "Content-Type": "application/json" },
-       body: JSON.stringify({ to: custPhoneClean, message: text }),
-      });
-
-       const waJson2 = await waRes2.json().catch(() => ({}));
-        if (!waRes2.ok) {
-        console.error("WhatsApp client error:", waJson2);
-          }),
-        });
+        console.error("WhatsApp error:", waJson);
+        alert("Error WhatsApp: " + (waJson?.error || "desconocido"));
+        alert(JSON.stringify(waJson, null, 2));
+        return;
       }
 
-      // 4) Limpiar carrito y datos del cliente
+      if (custPhoneClean) {
+        const waRes2 = await fetch("/api/whatsapp/send-order", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ to: custPhoneClean, message: text }),
+        });
+
+        const waJson2 = await waRes2.json().catch(() => ({}));
+
+        if (!waRes2.ok) {
+          console.error("WhatsApp client error:", waJson2);
+        }
+      }
+
       clearCart();
       setCustomerName("");
       setCustomerPhone("");
@@ -321,11 +322,9 @@ export default function OnlineStorePage() {
 
   return (
     <div className="min-h-screen bg-slate-50">
-      {/* BARRA SUPERIOR CON LOGO CENTRADO */}
       <header className="border-b border-slate-100 bg-white/80 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center justify-center gap-3 px-4 py-3 md:py-4">
           <div className="h-14 w-14 overflow-hidden rounded-full bg-white border border-pink-200 flex items-center justify-center">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src="/uploads/logo.jpg"
               alt="Logo Super Tienda Tenay"
@@ -341,33 +340,28 @@ export default function OnlineStorePage() {
         </div>
       </header>
 
-      {/* CONTENIDO */}
       <main className="mx-auto max-w-6xl px-4 py-6 md:px-6 md:py-8 space-y-6">
-        {/* Hero / título */}
         <section className="rounded-2xl bg-gradient-to-r from-pink-200 via-pink-300 to-pink-200 px-5 py-6 text-slate-900 shadow-md md:px-8 md:py-8">
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div>
               <h1 className="text-2xl font-bold md:text-3xl">
                 Compra en línea en Super Tienda Tenay
               </h1>
-              <p className="mt-2 text-sm text-slate-200 max-w-xl">
-                Productos con existencia real conectada a nuestro
-                punto de venta. Haz tu pedido y te confirmamos por
-                WhatsApp.
+              <p className="mt-2 text-sm text-slate-700 max-w-xl">
+                Productos con existencia real conectada a nuestro punto de
+                venta. Haz tu pedido y te confirmamos por WhatsApp.
               </p>
             </div>
             <div className="rounded-xl bg-pink-100/60 p-4 text-slate-900 shadow">
               <p className="font-semibold">¿Cómo funciona?</p>
-              <p className="text-slate-100">
-                1) Elige tus productos · 2) Armamos tu pedido y lo
-                enviamos por WhatsApp · 3) Pagas en tienda o con el
-                método que acordemos.
+              <p className="text-slate-700">
+                1) Elige tus productos · 2) Armamos tu pedido y lo enviamos por
+                WhatsApp · 3) Pagas en tienda o con el método que acordemos.
               </p>
             </div>
           </div>
         </section>
 
-        {/* Buscador, categorías y resumen */}
         <section className="rounded-xl bg-white p-4 shadow-sm md:p-5 space-y-3">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div className="flex-1">
@@ -382,7 +376,6 @@ export default function OnlineStorePage() {
                 onChange={(e) => setSearch(e.target.value)}
               />
 
-              {/* 🔹 Filtro por categoría */}
               {categories.length > 0 && (
                 <div className="mt-3 flex flex-wrap gap-2">
                   <button
@@ -396,6 +389,7 @@ export default function OnlineStorePage() {
                   >
                     Todas
                   </button>
+
                   {categories.map((cat) => (
                     <button
                       key={cat}
@@ -421,15 +415,6 @@ export default function OnlineStorePage() {
                   {filteredProducts.length}
                 </span>{" "}
                 producto(s)
-                {selectedCategory && (
-                  <>
-                    {" "}
-                    en{" "}
-                    <span className="font-semibold">
-                      {selectedCategory}
-                    </span>
-                  </>
-                )}
               </p>
               {loading && (
                 <p className="text-[11px] text-slate-400">
@@ -446,10 +431,8 @@ export default function OnlineStorePage() {
           )}
         </section>
 
-        {/* Productos + Carrito */}
         <section className="rounded-xl bg-white p-4 shadow-sm md:p-5">
           <div className="grid gap-4 lg:grid-cols-[3fr,2fr]">
-            {/* GRID DE PRODUCTOS */}
             <div>
               {loading && products.length === 0 ? (
                 <p className="text-sm text-slate-500">
@@ -463,6 +446,7 @@ export default function OnlineStorePage() {
                 <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
                   {filteredProducts.map((p) => {
                     const agotado = p.stock <= 0;
+
                     return (
                       <article
                         key={p._id}
@@ -470,7 +454,6 @@ export default function OnlineStorePage() {
                       >
                         <div className="relative h-32 w-full bg-slate-100 md:h-36">
                           {p.imageUrl ? (
-                            // eslint-disable-next-line @next/next/no-img-element
                             <img
                               src={p.imageUrl}
                               alt={p.name}
@@ -481,28 +464,32 @@ export default function OnlineStorePage() {
                               Sin imagen
                             </div>
                           )}
+
                           {agotado && (
                             <span className="absolute left-2 top-2 rounded-full bg-red-600 px-2 py-[2px] text-[10px] font-semibold text-white shadow">
                               Agotado
                             </span>
                           )}
                         </div>
+
                         <div className="flex flex-1 flex-col gap-1 p-3">
                           <div className="text-[11px] uppercase tracking-wide text-slate-400">
                             {p.category || "Sin categoría"}
                           </div>
+
                           <h2 className="line-clamp-2 text-sm font-semibold text-slate-900">
                             {p.name}
                           </h2>
+
                           <div className="mt-1 text-base font-bold text-slate-900">
                             {formatMoney(p.priceRetail)}
                           </div>
+
                           <div className="text-[11px] text-slate-500">
                             Stock:{" "}
-                            <span className="font-semibold">
-                              {p.stock}
-                            </span>
+                            <span className="font-semibold">{p.stock}</span>
                           </div>
+
                           <div className="mt-2">
                             <button
                               type="button"
@@ -523,7 +510,6 @@ export default function OnlineStorePage() {
               )}
             </div>
 
-            {/* PANEL DE CARRITO */}
             <aside className="rounded-xl border border-slate-200 bg-slate-50 p-3 md:p-4">
               <h2 className="text-sm font-semibold text-slate-800">
                 Tu carrito
@@ -531,8 +517,8 @@ export default function OnlineStorePage() {
 
               {cart.length === 0 ? (
                 <p className="mt-2 text-xs text-slate-500">
-                  Aún no has agregado productos. Toca “Añadir al
-                  carrito” en el catálogo.
+                  Aún no has agregado productos. Toca “Añadir al carrito” en el
+                  catálogo.
                 </p>
               ) : (
                 <>
@@ -552,12 +538,11 @@ export default function OnlineStorePage() {
                           <p className="text-[11px] text-slate-700">
                             Subtotal:{" "}
                             <span className="font-semibold">
-                              {formatMoney(
-                                item.price * item.quantity
-                              )}
+                              {formatMoney(item.price * item.quantity)}
                             </span>
                           </p>
                         </div>
+
                         <div className="flex flex-col items-end gap-1">
                           <div className="flex items-center gap-1">
                             <button
@@ -572,6 +557,7 @@ export default function OnlineStorePage() {
                             >
                               -
                             </button>
+
                             <input
                               type="number"
                               min={1}
@@ -584,6 +570,7 @@ export default function OnlineStorePage() {
                                 )
                               }
                             />
+
                             <button
                               type="button"
                               className="h-6 w-6 rounded-full border border-slate-300 text-xs font-bold text-slate-700 hover:bg-slate-100"
@@ -597,12 +584,11 @@ export default function OnlineStorePage() {
                               +
                             </button>
                           </div>
+
                           <button
                             type="button"
                             className="text-[10px] text-red-500 hover:text-red-700"
-                            onClick={() =>
-                              removeFromCart(item.productId)
-                            }
+                            onClick={() => removeFromCart(item.productId)}
                           >
                             Quitar
                           </button>
@@ -621,6 +607,7 @@ export default function OnlineStorePage() {
                         )}
                       </span>
                     </div>
+
                     <div className="flex justify-between text-sm font-semibold text-slate-900">
                       <span>Total estimado:</span>
                       <span>{formatMoney(cartTotal)}</span>
@@ -637,11 +624,11 @@ export default function OnlineStorePage() {
                 </>
               )}
 
-              {/* Datos del cliente */}
               <div className="mt-4 space-y-2 border-t border-slate-200 pt-3 text-xs">
                 <p className="text-[11px] font-semibold text-slate-700">
                   Datos para el pedido
                 </p>
+
                 <div>
                   <label className="mb-1 block text-[11px] text-slate-600">
                     Nombre del cliente
@@ -651,11 +638,10 @@ export default function OnlineStorePage() {
                     className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-[11px] outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                     placeholder="Ej. Yanet"
                     value={customerName}
-                    onChange={(e) =>
-                      setCustomerName(e.target.value)
-                    }
+                    onChange={(e) => setCustomerName(e.target.value)}
                   />
                 </div>
+
                 <div>
                   <label className="mb-1 block text-[11px] text-slate-600">
                     WhatsApp del cliente
@@ -665,15 +651,14 @@ export default function OnlineStorePage() {
                     className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-[11px] outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                     placeholder="Ej. 971 123 45 67"
                     value={customerPhone}
-                    onChange={(e) =>
-                      setCustomerPhone(e.target.value)
-                    }
+                    onChange={(e) => setCustomerPhone(e.target.value)}
                   />
                   <p className="mt-1 text-[10px] text-slate-500">
                     Si lo capturas, también le enviaremos el pedido por
                     WhatsApp.
                   </p>
                 </div>
+
                 <div>
                   <label className="mb-1 block text-[11px] text-slate-600">
                     Dirección
@@ -683,11 +668,10 @@ export default function OnlineStorePage() {
                     placeholder="Calle, número, colonia..."
                     rows={2}
                     value={customerAddress}
-                    onChange={(e) =>
-                      setCustomerAddress(e.target.value)
-                    }
+                    onChange={(e) => setCustomerAddress(e.target.value)}
                   />
                 </div>
+
                 <div>
                   <label className="mb-1 block text-[11px] text-slate-600">
                     Correo electrónico
@@ -697,18 +681,15 @@ export default function OnlineStorePage() {
                     className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-[11px] outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                     placeholder="Ej. cliente@correo.com"
                     value={customerEmail}
-                    onChange={(e) =>
-                      setCustomerEmail(e.target.value)
-                    }
+                    onChange={(e) => setCustomerEmail(e.target.value)}
                   />
                   <p className="mt-1 text-[10px] text-slate-500">
-                    Te servirá para enviar promociones y seguimiento a
-                    tus clientes.
+                    Te servirá para enviar promociones y seguimiento a tus
+                    clientes.
                   </p>
                 </div>
               </div>
 
-              {/* Botón único WhatsApp */}
               <div className="mt-3">
                 <button
                   type="button"

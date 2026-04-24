@@ -1,5 +1,3 @@
-import fetch from "node-fetch";
-
 type SendWhatsAppTextArgs = {
   to: string; // formato internacional: 52 + 10 dígitos (MX)
   text: string;
