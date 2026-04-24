@@ -3,6 +3,23 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 
+type Permissions = {
+  canSell: boolean;
+  canManageProducts: boolean;
+  canSeeReports: boolean;
+  canDoCashCuts: boolean;
+  canCancelSales: boolean;
+  canManageUsers: boolean;
+  canAccessConfig: boolean;
+};
+
+type SessionUser = {
+  _id: string;
+  username: string;
+  role: "admin" | "supervisor" | "encargado" | "cajero";
+  permissions: Permissions;
+};
+
 type Summary = {
   date: string;
   totalSales: number;
@@ -14,6 +31,8 @@ type Summary = {
 };
 
 export default function ReportsPage() {
+  const [sessionUser, setSessionUser] = useState<SessionUser | null>(null);
+  const [sessionLoading, setSessionLoading] = useState(true);
   const [date, setDate] = useState<string>(() => {
     const now = new Date();
     const y = now.getFullYear();
@@ -25,15 +44,43 @@ export default function ReportsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  async function loadSession() {
+    try {
+      setSessionLoading(true);
+
+      const res = await fetch("/api/auth/me", {
+        cache: "no-store",
+      });
+
+      if (!res.ok) {
+        setSessionUser(null);
+        return;
+      }
+
+      const data = await res.json();
+      setSessionUser(data.user ?? data);
+    } catch (e) {
+      console.error("Error al cargar sesión:", e);
+      setSessionUser(null);
+    } finally {
+      setSessionLoading(false);
+    }
+  }
+
   async function loadSummary(selectedDate: string) {
     try {
       setError(null);
       setLoading(true);
-      const res = await fetch(`/api/reports/summary?date=${selectedDate}`);
+
+      const res = await fetch(`/api/reports/summary?date=${selectedDate}`, {
+        cache: "no-store",
+      });
+
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.message || "No se pudo cargar el resumen");
       }
+
       const data = await res.json();
       setSummary(data);
     } catch (e: any) {
@@ -45,14 +92,17 @@ export default function ReportsPage() {
   }
 
   useEffect(() => {
-    loadSummary(date);
+    loadSession();
   }, []);
+
+  useEffect(() => {
+    if (!sessionLoading && sessionUser?.permissions?.canSeeReports) {
+      loadSummary(date);
+    }
+  }, [sessionLoading, sessionUser, date]);
 
   const handleChangeDate = (value: string) => {
     setDate(value);
-    if (value) {
-      loadSummary(value);
-    }
   };
 
   const formatMoney = (value: number | undefined | null) => {
@@ -72,6 +122,74 @@ export default function ReportsPage() {
           day: "2-digit",
         })
       : "";
+
+  if (sessionLoading) {
+    return (
+      <div className="min-h-screen bg-slate-100 p-4 md:p-8">
+        <div className="mx-auto max-w-6xl">
+          <div className="rounded-xl bg-white p-6 shadow-md">
+            <p className="text-sm text-slate-600">Cargando permisos...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!sessionUser) {
+    return (
+      <div className="min-h-screen bg-slate-100 p-4 md:p-8">
+        <div className="mx-auto max-w-3xl">
+          <div className="rounded-xl bg-white p-6 shadow-md">
+            <h1 className="text-xl font-bold text-slate-900">
+              Acceso denegado
+            </h1>
+            <p className="mt-2 text-sm text-slate-600">
+              Debes iniciar sesión para ver esta sección.
+            </p>
+            <div className="mt-4">
+              <Link
+                href="/login"
+                className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-slate-800"
+              >
+                Ir a iniciar sesión
+              </Link>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!sessionUser.permissions?.canSeeReports) {
+    return (
+      <div className="min-h-screen bg-slate-100 p-4 md:p-8">
+        <div className="mx-auto max-w-3xl">
+          <div className="rounded-xl bg-white p-6 shadow-md">
+            <h1 className="text-xl font-bold text-slate-900">
+              Sin permiso para reportes
+            </h1>
+            <p className="mt-2 text-sm text-slate-600">
+              Tu usuario no tiene permiso para ver reportes.
+            </p>
+            <div className="mt-4 flex gap-2">
+              <Link
+                href="/pos"
+                className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-slate-800"
+              >
+                Ir al POS
+              </Link>
+              <Link
+                href="/admin/dashboard"
+                className="rounded-lg bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-800 shadow hover:bg-slate-300"
+              >
+                Ir al panel
+              </Link>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-100 p-4 md:p-8">
@@ -108,7 +226,7 @@ export default function ReportsPage() {
                 type="date"
                 value={date}
                 onChange={(e) => handleChangeDate(e.target.value)}
-                className="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 bg-white"
+                className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
               />
               {formattedDate && (
                 <p className="mt-1 text-xs text-slate-500">
@@ -126,14 +244,13 @@ export default function ReportsPage() {
           </div>
 
           {error && (
-            <div className="mt-4 rounded-md bg-red-100 px-4 py-2 text-xs text-red-700 border border-red-200">
+            <div className="mt-4 rounded-md border border-red-200 bg-red-100 px-4 py-2 text-xs text-red-700">
               {error}
             </div>
           )}
 
           {!error && summary && (
             <div className="mt-6 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {/* Ventas del día */}
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
                 <h3 className="text-xs font-semibold uppercase text-slate-500">
                   Ventas del día
@@ -147,7 +264,6 @@ export default function ReportsPage() {
                 </p>
               </div>
 
-              {/* Costo de lo vendido */}
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
                 <h3 className="text-xs font-semibold uppercase text-slate-500">
                   Costo de mercancía vendida
@@ -160,7 +276,6 @@ export default function ReportsPage() {
                 </p>
               </div>
 
-              {/* Ganancia del día */}
               <div className="rounded-xl border border-slate-200 bg-emerald-50 p-4">
                 <h3 className="text-xs font-semibold uppercase text-emerald-700">
                   Ganancia del día
@@ -173,7 +288,6 @@ export default function ReportsPage() {
                 </p>
               </div>
 
-              {/* Valor inventario a costo */}
               <div className="rounded-xl border border-slate-200 bg-white p-4">
                 <h3 className="text-xs font-semibold uppercase text-slate-500">
                   Valor inventario a costo
@@ -186,7 +300,6 @@ export default function ReportsPage() {
                 </p>
               </div>
 
-              {/* Valor inventario a precio de venta */}
               <div className="rounded-xl border border-slate-200 bg-white p-4">
                 <h3 className="text-xs font-semibold uppercase text-slate-500">
                   Valor inventario a precio de venta

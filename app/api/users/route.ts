@@ -56,6 +56,7 @@ export async function GET(req: NextRequest) {
 
     const raw = req.cookies.get("sessionUser")?.value;
     const session = parseSessionCookie(raw);
+
     if (!session || !session.permissions.canManageUsers) {
       return NextResponse.json(
         { message: "No autorizado" },
@@ -63,9 +64,7 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const users = await User.find()
-      .sort({ createdAt: -1 })
-      .lean();
+    const users = await User.find().sort({ createdAt: -1 }).lean();
 
     const sanitized = users.map((u: any) => ({
       _id: u._id.toString(),
@@ -95,6 +94,7 @@ export async function POST(req: NextRequest) {
 
     const raw = req.cookies.get("sessionUser")?.value;
     const session = parseSessionCookie(raw);
+
     if (!session || !session.permissions.canManageUsers) {
       return NextResponse.json(
         { message: "No autorizado" },
@@ -103,6 +103,7 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
+
     const {
       username,
       password,
@@ -119,10 +120,7 @@ export async function POST(req: NextRequest) {
 
     if (!username || !password || !role) {
       return NextResponse.json(
-        {
-          message:
-            "Usuario, contraseña y rol son obligatorios",
-        },
+        { message: "Usuario, contraseña y rol son obligatorios" },
         { status: 400 }
       );
     }
@@ -158,6 +156,7 @@ export async function POST(req: NextRequest) {
         role: user.role,
         permissions: user.permissions,
         isActive: user.isActive,
+        createdAt: user.createdAt,
       },
       { status: 201 }
     );

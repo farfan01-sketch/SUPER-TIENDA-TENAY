@@ -1,6 +1,8 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import bcrypt from "bcryptjs";
+import { connectDB } from "@/lib/db";
+import { User } from "@/lib/models/User";
 
-// Tipo mínimo de usuario de sesión (sin depender de lib/)
 type SessionUser = {
   _id: string;
   username: string;
@@ -16,16 +18,38 @@ type SessionUser = {
   };
 };
 
-// Construye el valor de la cookie como hacías en lib/auth.ts
 function buildSessionCookieValue(user: SessionUser): string {
   return encodeURIComponent(JSON.stringify(user));
 }
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
-    const { username, password } = await request.json();
+    await connectDB();
 
-    console.log("BODY LOGIN:", { username, password });
+    // Asegura que exista un admin funcional para pruebas
+    const adminPasswordHash = await bcrypt.hash("1234", 10);
+
+    await User.findOneAndUpdate(
+      { username: "admin" },
+      {
+        username: "admin",
+        passwordHash: adminPasswordHash,
+        role: "admin",
+        isActive: true,
+        permissions: {
+          canSell: true,
+          canManageProducts: true,
+          canSeeReports: true,
+          canDoCashCuts: true,
+          canCancelSales: true,
+          canManageUsers: true,
+          canAccessConfig: true,
+        },
+      },
+      { upsert: true, new: true }
+    );
+
+    const { username, password } = await request.json();
 
     if (!username || !password) {
       return NextResponse.json(
@@ -34,11 +58,25 @@ export async function POST(request: Request) {
       );
     }
 
-    // Usuario de prueba
-    const ADMIN_USER = "admin";
-    const ADMIN_PASS = "1234";
+    const user = await User.findOne({ username }).lean();
 
-    if (username !== ADMIN_USER || password !== ADMIN_PASS) {
+    if (!user) {
+      return NextResponse.json(
+        { message: "Usuario o contraseña incorrectos" },
+        { status: 401 }
+      );
+    }
+
+    if (!user.isActive) {
+      return NextResponse.json(
+        { message: "Este usuario está inactivo" },
+        { status: 403 }
+      );
+    }
+
+    const passwordOk = await bcrypt.compare(password, user.passwordHash);
+
+    if (!passwordOk) {
       return NextResponse.json(
         { message: "Usuario o contraseña incorrectos" },
         { status: 401 }
@@ -46,18 +84,10 @@ export async function POST(request: Request) {
     }
 
     const session: SessionUser = {
-      _id: "demo-admin-id",
-      username: ADMIN_USER,
-      role: "admin",
-      permissions: {
-        canSell: true,
-        canManageProducts: true,
-        canSeeReports: true,
-        canDoCashCuts: true,
-        canCancelSales: true,
-        canManageUsers: true,
-        canAccessConfig: true,
-      },
+      _id: user._id.toString(),
+      username: user.username,
+      role: user.role,
+      permissions: user.permissions,
     };
 
     const cookieValue = buildSessionCookieValue(session);
@@ -67,19 +97,21 @@ export async function POST(request: Request) {
       { status: 200 }
     );
 
-    // Nombre de cookie que ya usa tu POS
     response.cookies.set("sessionUser", cookieValue, {
       httpOnly: true,
       path: "/",
-      maxAge: 60 * 60 * 8, // 8 horas
+      maxAge: 60 * 60 * 8,
       sameSite: "lax",
     });
 
     return response;
-  } catch (error) {
+  } catch (error: any) {
     console.error("ERROR /api/auth/login:", error);
     return NextResponse.json(
-      { message: "Error interno en el servidor" },
+      {
+        message: "Error interno en el servidor",
+        error: error?.message || "Error desconocido",
+      },
       { status: 500 }
     );
   }

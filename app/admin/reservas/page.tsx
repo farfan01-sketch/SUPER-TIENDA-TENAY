@@ -5,7 +5,8 @@ import Link from "next/link";
 
 type ServiceType = "uñas" | "alaciado";
 
-type BookingStatus = "reservado" | "cancelado";
+// ✅ Agregamos confirmado para poder disparar WhatsApp al confirmar
+type BookingStatus = "reservado" | "confirmado" | "cancelado";
 
 type Booking = {
   _id: string;
@@ -14,7 +15,7 @@ type Booking = {
   endTime: string; // "12:00"
   serviceType: ServiceType;
   customerName: string;
-  customerPhone: string;
+  customerPhone: string; // idealmente formato 52XXXXXXXXXX
   notes?: string;
   status: BookingStatus;
 };
@@ -38,19 +39,43 @@ function generateSlots(config: ScheduleConfig): Slot[] {
     h += config.slotDuration
   ) {
     const start = `${h.toString().padStart(2, "0")}:00`;
-    const end = `${(h + config.slotDuration)
-      .toString()
-      .padStart(2, "0")}:00`;
+    const end = `${(h + config.slotDuration).toString().padStart(2, "0")}:00`;
     slots.push({ start, end });
   }
   return slots;
 }
 
 const DEFAULT_CONFIG: ScheduleConfig = {
-  openHour: 10, // 10:00
-  closeHour: 20, // 20:00
-  slotDuration: 2, // 2 horas
+  openHour: 10,
+  closeHour: 20,
+  slotDuration: 2,
 };
+
+// ✅ “Grupos de horario” (presets)
+const SCHEDULE_GROUPS: { key: string; label: string; config: ScheduleConfig }[] =
+  [
+    {
+      key: "normal",
+      label: "Horario normal (10–20 / 2h)",
+      config: { openHour: 10, closeHour: 20, slotDuration: 2 },
+    },
+    {
+      key: "amplio",
+      label: "Horario amplio (09–21 / 2h)",
+      config: { openHour: 9, closeHour: 21, slotDuration: 2 },
+    },
+    {
+      key: "corto",
+      label: "Horario corto (12–20 / 2h)",
+      config: { openHour: 12, closeHour: 20, slotDuration: 2 },
+    },
+  ];
+
+// Helpers
+function safeUpperFirst(s: string) {
+  if (!s) return s;
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
 
 export default function AdminReservasPage() {
   const todayStr = new Date().toISOString().slice(0, 10);
@@ -62,18 +87,16 @@ export default function AdminReservasPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  // configuración de horarios (grupos de horario)
+  // configuración de horarios
   const [scheduleConfig, setScheduleConfig] =
     useState<ScheduleConfig>(DEFAULT_CONFIG);
 
-  const slots = useMemo(
-    () => generateSlots(scheduleConfig),
-    [scheduleConfig]
-  );
+  // ✅ selector de grupos
+  const [selectedGroup, setSelectedGroup] = useState<string>("normal");
 
-  // cita seleccionada para editar
-  const [selectedBooking, setSelectedBooking] =
-    useState<Booking | null>(null);
+  const slots = useMemo(() => generateSlots(scheduleConfig), [scheduleConfig]);
+
+  const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
 
   function clearMessages() {
     setError(null);
@@ -85,23 +108,16 @@ export default function AdminReservasPage() {
       clearMessages();
       setLoading(true);
 
-      const res = await fetch(
-        `/api/bookings?date=${selectedDate}`
-      );
+      const res = await fetch(`/api/bookings?date=${selectedDate}`);
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        throw new Error(
-          data?.message || "Error al cargar reservas"
-        );
+        throw new Error(data?.message || "Error al cargar reservas");
       }
+
       const data: Booking[] = await res.json();
       setBookings(data);
 
-      // si la reserva seleccionada ya no existe para ese día, la limpiamos
-      if (
-        selectedBooking &&
-        !data.find((b) => b._id === selectedBooking._id)
-      ) {
+      if (selectedBooking && !data.find((b) => b._id === selectedBooking._id)) {
         setSelectedBooking(null);
       }
     } catch (err: any) {
@@ -117,11 +133,12 @@ export default function AdminReservasPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [date]);
 
+  // ✅ Reservado + Confirmado se muestran en el slot
   function getBookingsForSlot(start: string): Booking[] {
     return bookings.filter(
       (b) =>
         b.startTime === start &&
-        b.status === "reservado"
+        (b.status === "reservado" || b.status === "confirmado")
     );
   }
 
@@ -141,55 +158,94 @@ export default function AdminReservasPage() {
     });
   }
 
-  async function handleSaveBooking() {
+  // ✅ Enviar WhatsApp helper (reusa tu endpoint /api/whatsapp/send-order)
+  async function sendWhatsApp(to: string, message: string) {
+    const wres = await fetch("/api/whatsapp/send-order", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ to, message }),
+    });
+
+    const wdata = await wres.json().catch(() => ({}));
+    if (!wres.ok) {
+      console.error("WhatsApp falló:", wdata);
+      return { ok: false, data: wdata };
+    }
+    return { ok: true, data: wdata };
+  }
+
+  async function handleSaveBooking(options?: { notifyWhatsApp?: boolean }) {
     if (!selectedBooking) return;
     clearMessages();
 
     try {
       setSaving(true);
-      const res = await fetch(
-        `/api/bookings/${selectedBooking._id}`,
-        {
-          method: "PATCH",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            date: selectedBooking.date,
-            startTime: selectedBooking.startTime,
-            endTime: selectedBooking.endTime,
-            serviceType: selectedBooking.serviceType,
-            customerName: selectedBooking.customerName,
-            customerPhone: selectedBooking.customerPhone,
-            notes: selectedBooking.notes,
-            status: selectedBooking.status,
-          }),
-        }
-      );
+
+      const res = await fetch(`/api/bookings/${selectedBooking._id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          date: selectedBooking.date,
+          startTime: selectedBooking.startTime,
+          endTime: selectedBooking.endTime,
+          serviceType: selectedBooking.serviceType,
+          customerName: selectedBooking.customerName,
+          customerPhone: selectedBooking.customerPhone,
+          notes: selectedBooking.notes,
+          status: selectedBooking.status,
+        }),
+      });
 
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        throw new Error(
-          data?.message || "Error al guardar cambios"
-        );
+        throw new Error(data?.message || "Error al guardar cambios");
+      }
+
+      // ✅ WhatsApp SOLO si se pide (confirmación/cancelación)
+      if (options?.notifyWhatsApp) {
+        const phone = (selectedBooking.customerPhone || "").trim();
+        if (phone) {
+          const msg =
+            selectedBooking.status === "confirmado"
+              ? `✨ Tu cita ha sido CONFIRMADA ✨
+
+📅 Fecha: ${selectedBooking.date}
+⏰ Hora: ${selectedBooking.startTime} - ${selectedBooking.endTime}
+💅 Servicio: ${safeUpperFirst(selectedBooking.serviceType)}
+
+Gracias por reservar con Super Tienda Tenay 💖`
+              : selectedBooking.status === "cancelado"
+              ? `⚠️ Tu cita fue CANCELADA
+
+📅 Fecha: ${selectedBooking.date}
+⏰ Hora: ${selectedBooking.startTime} - ${selectedBooking.endTime}
+💅 Servicio: ${safeUpperFirst(selectedBooking.serviceType)}
+
+Si deseas reagendar, entra a la página de reservas 🙌`
+              : "";
+
+          if (msg) {
+            await sendWhatsApp(phone, msg);
+          }
+        } else {
+          console.warn("No hay customerPhone para enviar WhatsApp");
+        }
       }
 
       setSuccess("Cambios guardados correctamente.");
       await loadBookings(date);
     } catch (err: any) {
       console.error(err);
-      setError(
-        err.message || "Error al guardar la reserva"
-      );
+      setError(err.message || "Error al guardar la reserva");
     } finally {
       setSaving(false);
     }
   }
 
-  async function handleSetStatus(status: BookingStatus) {
+  async function handleSetStatus(status: BookingStatus, notify = false) {
     if (!selectedBooking) return;
     handleChangeSelected("status", status);
-    await handleSaveBooking();
+    await handleSaveBooking({ notifyWhatsApp: notify });
   }
 
   function handleChangeScheduleField(
@@ -200,6 +256,38 @@ export default function AdminReservasPage() {
       ...prev,
       [field]: value,
     }));
+    // si editas manual, el grupo pasa a "custom"
+    setSelectedGroup("custom");
+  }
+
+  function applyScheduleGroup(groupKey: string) {
+    setSelectedGroup(groupKey);
+    const group = SCHEDULE_GROUPS.find((g) => g.key === groupKey);
+    if (group) {
+      setScheduleConfig(group.config);
+    }
+  }
+
+  function statusBadge(status: BookingStatus) {
+    if (status === "reservado") {
+      return (
+        <span className="rounded-full bg-red-100 border border-red-200 px-2 py-0.5 text-[10px] font-semibold text-red-700">
+          Reservado
+        </span>
+      );
+    }
+    if (status === "confirmado") {
+      return (
+        <span className="rounded-full bg-yellow-100 border border-yellow-200 px-2 py-0.5 text-[10px] font-semibold text-yellow-800">
+          Confirmado
+        </span>
+      );
+    }
+    return (
+      <span className="rounded-full bg-slate-100 border border-slate-200 px-2 py-0.5 text-[10px] font-semibold text-slate-700">
+        Cancelado
+      </span>
+    );
   }
 
   return (
@@ -212,8 +300,8 @@ export default function AdminReservasPage() {
               Panel de reservas (admin)
             </h1>
             <p className="text-xs text-slate-600">
-              Confirma, ajusta horarios o cancela citas de
-              uñas y alaciados.
+              Confirma (con WhatsApp), ajusta horarios o cancela citas de uñas y
+              alaciados.
             </p>
           </div>
 
@@ -230,9 +318,7 @@ export default function AdminReservasPage() {
         {/* FECHA Y MENSAJES */}
         <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
           <div className="flex items-center gap-2">
-            <label className="text-sm font-semibold">
-              Fecha:
-            </label>
+            <label className="text-sm font-semibold">Fecha:</label>
             <input
               type="date"
               className="border rounded px-3 py-2 text-sm"
@@ -242,11 +328,7 @@ export default function AdminReservasPage() {
           </div>
 
           <div className="space-y-1 text-xs">
-            {loading && (
-              <span className="text-slate-500">
-                Cargando reservas...
-              </span>
-            )}
+            {loading && <span className="text-slate-500">Cargando reservas...</span>}
             {error && (
               <div className="rounded bg-red-100 px-3 py-1 text-red-700 border border-red-200">
                 {error}
@@ -264,21 +346,41 @@ export default function AdminReservasPage() {
         <div className="grid gap-4 md:grid-cols-[2fr,1.3fr]">
           {/* COLUMNA IZQUIERDA: HORARIOS */}
           <section className="rounded-xl bg-white p-4 shadow-md space-y-3">
-            <h2 className="text-sm font-semibold text-slate-800 mb-1">
-              Horarios del día
-            </h2>
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-slate-800">
+                Horarios del día
+              </h2>
+
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] text-slate-500">Leyenda:</span>
+                <span className="text-[11px] px-2 py-0.5 rounded bg-green-50 border border-emerald-200 text-emerald-700">
+                  Libre
+                </span>
+                <span className="text-[11px] px-2 py-0.5 rounded bg-red-50 border border-red-200 text-red-700">
+                  Reservado
+                </span>
+                <span className="text-[11px] px-2 py-0.5 rounded bg-yellow-50 border border-yellow-200 text-yellow-800">
+                  Confirmado
+                </span>
+              </div>
+            </div>
 
             <div className="grid md:grid-cols-3 gap-3">
               {slots.map((slot) => {
-                const slotBookings = getBookingsForSlot(
-                  slot.start
-                );
-                const hasBookings =
-                  slotBookings.length > 0;
+                const slotBookings = getBookingsForSlot(slot.start);
+                const hasBookings = slotBookings.length > 0;
 
                 const isSelected =
-                  !!selectedBooking &&
-                  selectedBooking.startTime === slot.start;
+                  !!selectedBooking && selectedBooking.startTime === slot.start;
+
+                // si hay booking confirmado en ese slot, colorea amarillo
+                const anyConfirmed = slotBookings.some((b) => b.status === "confirmado");
+
+                const baseColor = hasBookings
+                  ? anyConfirmed
+                    ? "bg-yellow-50 border-yellow-300"
+                    : "bg-red-50 border-red-300"
+                  : "bg-green-50 border-emerald-300";
 
                 return (
                   <button
@@ -286,22 +388,13 @@ export default function AdminReservasPage() {
                     type="button"
                     onClick={() => {
                       if (hasBookings) {
-                        // selecciona la primera reserva del slot
-                        handleSelectBooking(
-                          slotBookings[0]
-                        );
+                        handleSelectBooking(slotBookings[0]);
                       } else {
                         setSelectedBooking(null);
                       }
                     }}
-                    className={`border rounded p-3 text-left text-xs transition ${
-                      hasBookings
-                        ? "bg-red-50 border-red-300"
-                        : "bg-green-50 border-emerald-300"
-                    } ${
-                      isSelected
-                        ? "ring-2 ring-blue-400"
-                        : ""
+                    className={`border rounded p-3 text-left text-xs transition ${baseColor} ${
+                      isSelected ? "ring-2 ring-blue-400" : ""
                     }`}
                   >
                     <div className="font-semibold text-sm mb-1">
@@ -313,14 +406,14 @@ export default function AdminReservasPage() {
                         {slotBookings.map((b) => (
                           <div
                             key={b._id}
-                            className="border border-red-200 rounded px-2 py-1 bg-white"
+                            className="border border-slate-200 rounded px-2 py-1 bg-white"
                           >
-                            <div className="font-semibold">
-                              {b.customerName}
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="font-semibold">{b.customerName}</div>
+                              {statusBadge(b.status)}
                             </div>
                             <div className="text-[11px] text-slate-600">
-                              {b.serviceType} · Tel:{" "}
-                              {b.customerPhone}
+                              {b.serviceType} · Tel: {b.customerPhone}
                             </div>
                             {b.notes && (
                               <div className="text-[10px] text-slate-500 mt-0.5">
@@ -331,9 +424,7 @@ export default function AdminReservasPage() {
                         ))}
                       </div>
                     ) : (
-                      <div className="text-[11px] text-emerald-700">
-                        Libre
-                      </div>
+                      <div className="text-[11px] text-emerald-700">Libre</div>
                     )}
                   </button>
                 );
@@ -351,11 +442,17 @@ export default function AdminReservasPage() {
 
               {!selectedBooking ? (
                 <p className="text-xs text-slate-500">
-                  Selecciona una cita en los horarios de la
-                  izquierda para editarla.
+                  Selecciona una cita en los horarios de la izquierda para editarla.
                 </p>
               ) : (
                 <div className="space-y-2 text-xs">
+                  <div className="flex items-center justify-between">
+                    <div className="text-[11px] text-slate-600">
+                      ID: <span className="font-mono">{selectedBooking._id}</span>
+                    </div>
+                    {statusBadge(selectedBooking.status)}
+                  </div>
+
                   <div className="grid grid-cols-2 gap-2">
                     <div>
                       <label className="block text-[11px] font-semibold mb-1">
@@ -364,15 +461,9 @@ export default function AdminReservasPage() {
                       <input
                         type="date"
                         className="w-full border rounded px-2 py-1"
-                        value={selectedBooking.date.slice(
-                          0,
-                          10
-                        )}
+                        value={selectedBooking.date.slice(0, 10)}
                         onChange={(e) =>
-                          handleChangeSelected(
-                            "date",
-                            e.target.value
-                          )
+                          handleChangeSelected("date", e.target.value)
                         }
                       />
                     </div>
@@ -385,25 +476,14 @@ export default function AdminReservasPage() {
                         value={selectedBooking.startTime}
                         onChange={(e) => {
                           const newStart = e.target.value;
-                          const slot = slots.find(
-                            (s) => s.start === newStart
-                          );
+                          const slot = slots.find((s) => s.start === newStart);
                           if (!slot) return;
-                          handleChangeSelected(
-                            "startTime",
-                            slot.start
-                          );
-                          handleChangeSelected(
-                            "endTime",
-                            slot.end
-                          );
+                          handleChangeSelected("startTime", slot.start);
+                          handleChangeSelected("endTime", slot.end);
                         }}
                       >
                         {slots.map((s) => (
-                          <option
-                            key={s.start}
-                            value={s.start}
-                          >
+                          <option key={s.start} value={s.start}>
                             {s.start} - {s.end}
                           </option>
                         ))}
@@ -427,9 +507,7 @@ export default function AdminReservasPage() {
                         }
                       >
                         <option value="uñas">Uñas</option>
-                        <option value="alaciado">
-                          Alaciado
-                        </option>
+                        <option value="alaciado">Alaciado</option>
                       </select>
                     </div>
                     <div>
@@ -446,13 +524,14 @@ export default function AdminReservasPage() {
                           )
                         }
                       >
-                        <option value="reservado">
-                          Reservado
-                        </option>
-                        <option value="cancelado">
-                          Cancelado
-                        </option>
+                        <option value="reservado">Reservado</option>
+                        <option value="confirmado">Confirmado</option>
+                        <option value="cancelado">Cancelado</option>
                       </select>
+                      <p className="mt-1 text-[10px] text-slate-500">
+                        Cambiar aquí NO manda WhatsApp. Para enviar WhatsApp usa los
+                        botones de abajo.
+                      </p>
                     </div>
                   </div>
 
@@ -464,10 +543,7 @@ export default function AdminReservasPage() {
                       className="w-full border rounded px-2 py-1"
                       value={selectedBooking.customerName}
                       onChange={(e) =>
-                        handleChangeSelected(
-                          "customerName",
-                          e.target.value
-                        )
+                        handleChangeSelected("customerName", e.target.value)
                       }
                     />
                   </div>
@@ -480,12 +556,12 @@ export default function AdminReservasPage() {
                       className="w-full border rounded px-2 py-1"
                       value={selectedBooking.customerPhone}
                       onChange={(e) =>
-                        handleChangeSelected(
-                          "customerPhone",
-                          e.target.value
-                        )
+                        handleChangeSelected("customerPhone", e.target.value)
                       }
                     />
+                    <p className="mt-1 text-[10px] text-slate-500">
+                      Recomendado: formato <b>52XXXXXXXXXX</b>
+                    </p>
                   </div>
 
                   <div>
@@ -497,10 +573,7 @@ export default function AdminReservasPage() {
                       className="w-full border rounded px-2 py-1"
                       value={selectedBooking.notes || ""}
                       onChange={(e) =>
-                        handleChangeSelected(
-                          "notes",
-                          e.target.value
-                        )
+                        handleChangeSelected("notes", e.target.value)
                       }
                     />
                   </div>
@@ -508,33 +581,40 @@ export default function AdminReservasPage() {
                   <div className="flex flex-wrap gap-2 pt-2">
                     <button
                       type="button"
-                      onClick={handleSaveBooking}
+                      onClick={() => handleSaveBooking()}
                       disabled={saving}
                       className="rounded bg-blue-600 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
                     >
-                      {saving
-                        ? "Guardando..."
-                        : "Guardar cambios"}
+                      {saving ? "Guardando..." : "Guardar cambios"}
+                    </button>
+
+                    {/* ✅ Confirmar + WhatsApp */}
+                    <button
+                      type="button"
+                      onClick={() => handleSetStatus("confirmado", true)}
+                      disabled={saving}
+                      className="rounded bg-yellow-500 px-3 py-1.5 text-[11px] font-semibold text-slate-900 hover:bg-yellow-600 disabled:opacity-60"
+                    >
+                      Confirmar + WhatsApp
                     </button>
 
                     <button
                       type="button"
-                      onClick={() =>
-                        handleSetStatus("reservado")
-                      }
-                      className="rounded bg-emerald-600 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-emerald-700"
+                      onClick={() => handleSetStatus("reservado", false)}
+                      disabled={saving}
+                      className="rounded bg-emerald-600 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
                     >
                       Marcar como reservado
                     </button>
 
+                    {/* ✅ Cancelar + WhatsApp (si no lo quieres, te lo quito) */}
                     <button
                       type="button"
-                      onClick={() =>
-                        handleSetStatus("cancelado")
-                      }
-                      className="rounded bg-red-600 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-red-700"
+                      onClick={() => handleSetStatus("cancelado", true)}
+                      disabled={saving}
+                      className="rounded bg-red-600 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-red-700 disabled:opacity-60"
                     >
-                      Cancelar cita
+                      Cancelar + WhatsApp
                     </button>
                   </div>
                 </div>
@@ -547,11 +627,47 @@ export default function AdminReservasPage() {
                 Configuración de horarios
               </h2>
               <p className="text-[11px] text-slate-500 mb-2">
-                Ajusta el rango de atención y la duración de
-                cada bloque de horario. Esto afecta cómo se
-                muestran los horarios en este panel.
+                Cambia rápido con “grupos” o ajusta manual. Esto solo afecta ESTE
+                panel (luego lo guardamos en DB si quieres).
               </p>
 
+              {/* ✅ Grupos */}
+              <div className="mb-3">
+                <label className="block text-[11px] font-semibold mb-1">
+                  Grupos de horario
+                </label>
+                <select
+                  className="w-full border rounded px-2 py-2 text-xs"
+                  value={selectedGroup}
+                  onChange={(e) => applyScheduleGroup(e.target.value)}
+                >
+                  {SCHEDULE_GROUPS.map((g) => (
+                    <option key={g.key} value={g.key}>
+                      {g.label}
+                    </option>
+                  ))}
+                  <option value="custom">Personalizado (manual)</option>
+                </select>
+
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {SCHEDULE_GROUPS.map((g) => (
+                    <button
+                      key={g.key}
+                      type="button"
+                      onClick={() => applyScheduleGroup(g.key)}
+                      className={`rounded px-3 py-1.5 text-[11px] font-semibold border ${
+                        selectedGroup === g.key
+                          ? "bg-slate-900 text-white border-slate-900"
+                          : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
+                      }`}
+                    >
+                      {g.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Manual */}
               <div className="grid grid-cols-3 gap-2 text-xs">
                 <div>
                   <label className="block text-[11px] font-semibold mb-1">
@@ -564,10 +680,7 @@ export default function AdminReservasPage() {
                     className="w-full border rounded px-2 py-1"
                     value={scheduleConfig.openHour}
                     onChange={(e) =>
-                      handleChangeScheduleField(
-                        "openHour",
-                        Number(e.target.value || 0)
-                      )
+                      handleChangeScheduleField("openHour", Number(e.target.value || 0))
                     }
                   />
                 </div>
@@ -582,10 +695,7 @@ export default function AdminReservasPage() {
                     className="w-full border rounded px-2 py-1"
                     value={scheduleConfig.closeHour}
                     onChange={(e) =>
-                      handleChangeScheduleField(
-                        "closeHour",
-                        Number(e.target.value || 0)
-                      )
+                      handleChangeScheduleField("closeHour", Number(e.target.value || 0))
                     }
                   />
                 </div>
@@ -600,20 +710,15 @@ export default function AdminReservasPage() {
                     className="w-full border rounded px-2 py-1"
                     value={scheduleConfig.slotDuration}
                     onChange={(e) =>
-                      handleChangeScheduleField(
-                        "slotDuration",
-                        Number(e.target.value || 1)
-                      )
+                      handleChangeScheduleField("slotDuration", Number(e.target.value || 1))
                     }
                   />
                 </div>
               </div>
 
               <p className="mt-2 text-[10px] text-slate-500">
-                Si quieres que esta configuración también se
-                use en la página pública de reservas para tus
-                clientes, luego podemos guardar estos valores
-                en base de datos y reutilizarlos allá.
+                Siguiente paso (si quieres): guardamos este horario en DB y lo usamos
+                también en la página pública <b>/reservas</b>.
               </p>
             </div>
           </section>

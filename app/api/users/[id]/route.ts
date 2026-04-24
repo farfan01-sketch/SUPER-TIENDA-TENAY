@@ -18,6 +18,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
 
     const raw = req.cookies.get("sessionUser")?.value;
     const session = parseSessionCookie(raw);
+
     if (!session || !session.permissions.canManageUsers) {
       return NextResponse.json(
         { message: "No autorizado" },
@@ -41,6 +42,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     };
 
     const user = await User.findById(id);
+
     if (!user) {
       return NextResponse.json(
         { message: "Usuario no encontrado" },
@@ -62,6 +64,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     }
 
     if (role) user.role = role;
+
     if (typeof isActive === "boolean") {
       user.isActive = isActive;
     }
@@ -91,6 +94,72 @@ export async function PUT(req: NextRequest, { params }: Params) {
     return NextResponse.json(
       {
         message: "Error al actualizar usuario",
+        error: error?.message || "Error desconocido",
+      },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(req: NextRequest, { params }: Params) {
+  try {
+    await connectDB();
+
+    const raw = req.cookies.get("sessionUser")?.value;
+    const session = parseSessionCookie(raw);
+
+    if (!session) {
+      return NextResponse.json(
+        { message: "No autorizado" },
+        { status: 401 }
+      );
+    }
+
+    // Solo admin puede eliminar usuarios
+    if (session.role !== "admin") {
+      return NextResponse.json(
+        { message: "Solo el administrador puede eliminar usuarios" },
+        { status: 403 }
+      );
+    }
+
+    const { id } = await params;
+
+    const user = await User.findById(id);
+
+    if (!user) {
+      return NextResponse.json(
+        { message: "Usuario no encontrado" },
+        { status: 404 }
+      );
+    }
+
+    // No permitir eliminarse a sí mismo
+    if (user._id.toString() === session._id) {
+      return NextResponse.json(
+        { message: "No puedes eliminar tu propio usuario" },
+        { status: 400 }
+      );
+    }
+
+    // Proteger al admin principal
+    if (user.username === "admin") {
+      return NextResponse.json(
+        { message: "No se puede eliminar el administrador principal" },
+        { status: 400 }
+      );
+    }
+
+    await User.findByIdAndDelete(id);
+
+    return NextResponse.json({
+      message: "Usuario eliminado correctamente",
+    });
+  } catch (error: any) {
+    console.error("Error en DELETE /api/users/[id]:", error);
+    return NextResponse.json(
+      {
+        message: "Error al eliminar usuario",
         error: error?.message || "Error desconocido",
       },
       { status: 500 }

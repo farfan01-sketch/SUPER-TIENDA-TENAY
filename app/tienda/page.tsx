@@ -268,24 +268,35 @@ export default function OnlineStorePage() {
         }),
       });
 
-      // 2) Enviar mensaje a WhatsApp de la TIENDA (automático, sin ventanas)
-      await fetch("/api/whatsapp/send-order", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          to: storePhone,
-          message: text,
+      // 2) Enviar mensaje a WhatsApp de la TIENDA
+      const waRes = await fetch("/api/whatsapp/send-order", {
+       method: "POST",
+       headers: { "Content-Type": "application/json" },
+       body: JSON.stringify({ to: storePhone, message: text }),
+      });
+
+      const waJson = await waRes.json().catch(() => ({}));
+
+      if (!waRes.ok) {
+       console.error("WhatsApp error:", waJson);
+       alert("Error WhatsApp: " + (waJson?.error || "desconocido"));
+       // Si quieres ver TODO:
+       alert(JSON.stringify(waJson, null, 2));
+       return; // detenemos el flujo
         }),
       });
 
       // 3) Opcional: enviar copia al CLIENTE si puso su número
       if (custPhoneClean) {
-        await fetch("/api/whatsapp/send-order", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            to: custPhoneClean,
-            message: text,
+       const waRes2 = await fetch("/api/whatsapp/send-order", {
+       method: "POST",
+       headers: { "Content-Type": "application/json" },
+       body: JSON.stringify({ to: custPhoneClean, message: text }),
+      });
+
+       const waJson2 = await waRes2.json().catch(() => ({}));
+        if (!waRes2.ok) {
+        console.error("WhatsApp client error:", waJson2);
           }),
         });
       }

@@ -24,10 +24,76 @@ type User = {
   createdAt: string;
 };
 
+type SessionUser = {
+  _id: string;
+  username: string;
+  role: UserRole;
+  permissions: Permissions;
+};
+
+const ADMIN_PERMISSIONS: Permissions = {
+  canSell: true,
+  canManageProducts: true,
+  canSeeReports: true,
+  canDoCashCuts: true,
+  canCancelSales: true,
+  canManageUsers: true,
+  canAccessConfig: true,
+};
+
+const SUPERVISOR_PERMISSIONS: Permissions = {
+  canSell: true,
+  canManageProducts: true,
+  canSeeReports: true,
+  canDoCashCuts: true,
+  canCancelSales: true,
+  canManageUsers: false,
+  canAccessConfig: false,
+};
+
+const ENCARGADO_PERMISSIONS: Permissions = {
+  canSell: true,
+  canManageProducts: true,
+  canSeeReports: true,
+  canDoCashCuts: true,
+  canCancelSales: false,
+  canManageUsers: false,
+  canAccessConfig: false,
+};
+
+const CAJERO_PERMISSIONS: Permissions = {
+  canSell: true,
+  canManageProducts: false,
+  canSeeReports: false,
+  canDoCashCuts: false,
+  canCancelSales: false,
+  canManageUsers: false,
+  canAccessConfig: false,
+};
+
+function getDefaultPermissionsByRole(role: UserRole): Permissions {
+  switch (role) {
+    case "admin":
+      return { ...ADMIN_PERMISSIONS };
+    case "supervisor":
+      return { ...SUPERVISOR_PERMISSIONS };
+    case "encargado":
+      return { ...ENCARGADO_PERMISSIONS };
+    case "cajero":
+    default:
+      return { ...CAJERO_PERMISSIONS };
+  }
+}
+
 export default function UsersAdminPage() {
   const [users, setUsers] = useState<User[]>([]);
+  const [sessionUser, setSessionUser] = useState<SessionUser | null>(null);
   const [loading, setLoading] = useState(false);
   const [savingId, setSavingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [changingPasswordId, setChangingPasswordId] = useState<string | null>(
+    null
+  );
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -43,15 +109,7 @@ export default function UsersAdminPage() {
     password: "",
     role: "cajero",
     isActive: true,
-    permissions: {
-      canSell: true,
-      canManageProducts: false,
-      canSeeReports: false,
-      canDoCashCuts: false,
-      canCancelSales: false,
-      canManageUsers: false,
-      canAccessConfig: false,
-    },
+    permissions: { ...CAJERO_PERMISSIONS },
   });
 
   function clearMessages() {
@@ -59,17 +117,30 @@ export default function UsersAdminPage() {
     setSuccess(null);
   }
 
+  async function loadSession() {
+    try {
+      const res = await fetch("/api/auth/me", { cache: "no-store" });
+      if (!res.ok) return;
+
+      const data = await res.json();
+      setSessionUser(data.user ?? data);
+    } catch (e) {
+      console.error("Error al cargar sesión:", e);
+    }
+  }
+
   async function loadUsers() {
     try {
       setLoading(true);
       clearMessages();
-      const res = await fetch("/api/users");
+
+      const res = await fetch("/api/users", { cache: "no-store" });
+
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        throw new Error(
-          data.message || "No se pudieron cargar usuarios"
-        );
+        throw new Error(data.message || "No se pudieron cargar usuarios");
       }
+
       const data = await res.json();
       setUsers(data);
     } catch (e: any) {
@@ -80,55 +151,16 @@ export default function UsersAdminPage() {
   }
 
   useEffect(() => {
+    loadSession();
     loadUsers();
   }, []);
 
   function handleNewRoleChange(role: UserRole) {
-    setNewUser((prev) => {
-      let perms = { ...prev.permissions };
-      if (role === "admin") {
-        perms = {
-          canSell: true,
-          canManageProducts: true,
-          canSeeReports: true,
-          canDoCashCuts: true,
-          canCancelSales: true,
-          canManageUsers: true,
-          canAccessConfig: true,
-        };
-      } else if (role === "supervisor") {
-        perms = {
-          canSell: true,
-          canManageProducts: true,
-          canSeeReports: true,
-          canDoCashCuts: true,
-          canCancelSales: true,
-          canManageUsers: false,
-          canAccessConfig: false,
-        };
-      } else if (role === "encargado") {
-        perms = {
-          canSell: true,
-          canManageProducts: true,
-          canSeeReports: true,
-          canDoCashCuts: true,
-          canCancelSales: false,
-          canManageUsers: false,
-          canAccessConfig: false,
-        };
-      } else {
-        perms = {
-          canSell: true,
-          canManageProducts: false,
-          canSeeReports: false,
-          canDoCashCuts: false,
-          canCancelSales: false,
-          canManageUsers: false,
-          canAccessConfig: false,
-        };
-      }
-      return { ...prev, role, permissions: perms };
-    });
+    setNewUser((prev) => ({
+      ...prev,
+      role,
+      permissions: getDefaultPermissionsByRole(role),
+    }));
   }
 
   async function handleCreateUser(e: FormEvent) {
@@ -142,6 +174,7 @@ export default function UsersAdminPage() {
 
     try {
       setCreating(true);
+
       const res = await fetch("/api/users", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -150,9 +183,7 @@ export default function UsersAdminPage() {
 
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        throw new Error(
-          data.message || "Error al crear usuario"
-        );
+        throw new Error(data.message || "Error al crear usuario");
       }
 
       await loadUsers();
@@ -163,15 +194,7 @@ export default function UsersAdminPage() {
         password: "",
         role: "cajero",
         isActive: true,
-        permissions: {
-          canSell: true,
-          canManageProducts: false,
-          canSeeReports: false,
-          canDoCashCuts: false,
-          canCancelSales: false,
-          canManageUsers: false,
-          canAccessConfig: false,
-        },
+        permissions: { ...CAJERO_PERMISSIONS },
       });
     } catch (e: any) {
       setError(e.message || "Error al crear usuario");
@@ -182,8 +205,10 @@ export default function UsersAdminPage() {
 
   async function handleUpdateUser(user: User) {
     clearMessages();
+
     try {
       setSavingId(user._id);
+
       const res = await fetch(`/api/users/${user._id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -196,9 +221,7 @@ export default function UsersAdminPage() {
 
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        throw new Error(
-          data.message || "Error al actualizar usuario"
-        );
+        throw new Error(data.message || "Error al actualizar usuario");
       }
 
       await loadUsers();
@@ -210,10 +233,103 @@ export default function UsersAdminPage() {
     }
   }
 
-  function togglePermission(
-    userId: string,
-    key: keyof Permissions
-  ) {
+  async function handleChangePassword(user: User) {
+    clearMessages();
+
+    if (!sessionUser || sessionUser.role !== "admin") {
+      setError("Solo el administrador puede cambiar contraseñas");
+      return;
+    }
+
+    const newPassword = window.prompt(
+      `Escribe la nueva contraseña para "${user.username}":`
+    );
+
+    if (newPassword === null) return;
+
+    if (!newPassword.trim()) {
+      setError("La contraseña no puede estar vacía");
+      return;
+    }
+
+    const confirmPassword = window.prompt(
+      `Confirma la nueva contraseña para "${user.username}":`
+    );
+
+    if (confirmPassword === null) return;
+
+    if (newPassword !== confirmPassword) {
+      setError("Las contraseñas no coinciden");
+      return;
+    }
+
+    try {
+      setChangingPasswordId(user._id);
+
+      const res = await fetch(`/api/users/${user._id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          password: newPassword,
+        }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        throw new Error(data.message || "Error al cambiar contraseña");
+      }
+
+      setSuccess(`Contraseña actualizada para ${user.username}`);
+    } catch (e: any) {
+      setError(e.message || "Error al cambiar contraseña");
+    } finally {
+      setChangingPasswordId(null);
+    }
+  }
+
+  async function handleDeleteUser(user: User) {
+    clearMessages();
+
+    if (!sessionUser || sessionUser.role !== "admin") {
+      setError("Solo el administrador puede eliminar usuarios");
+      return;
+    }
+
+    const confirmText = window.prompt(
+      `¿Seguro que deseas eliminar al usuario "${user.username}"?\n\nEscribe exactamente el nombre del usuario para confirmar:`
+    );
+
+    if (confirmText === null) return;
+
+    if (confirmText.trim() !== user.username) {
+      setError("Confirmación incorrecta. No se eliminó el usuario.");
+      return;
+    }
+
+    try {
+      setDeletingId(user._id);
+
+      const res = await fetch(`/api/users/${user._id}`, {
+        method: "DELETE",
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        throw new Error(data.message || "Error al eliminar usuario");
+      }
+
+      await loadUsers();
+      setSuccess("Usuario eliminado correctamente");
+    } catch (e: any) {
+      setError(e.message || "Error al eliminar usuario");
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
+  function togglePermission(userId: string, key: keyof Permissions) {
     setUsers((prev) =>
       prev.map((u) =>
         u._id === userId
@@ -232,7 +348,13 @@ export default function UsersAdminPage() {
   function changeUserRole(userId: string, role: UserRole) {
     setUsers((prev) =>
       prev.map((u) =>
-        u._id === userId ? { ...u, role } : u
+        u._id === userId
+          ? {
+              ...u,
+              role,
+              permissions: getDefaultPermissionsByRole(role),
+            }
+          : u
       )
     );
   }
@@ -240,24 +362,34 @@ export default function UsersAdminPage() {
   function toggleUserActive(userId: string) {
     setUsers((prev) =>
       prev.map((u) =>
-        u._id === userId
-          ? { ...u, isActive: !u.isActive }
-          : u
+        u._id === userId ? { ...u, isActive: !u.isActive } : u
       )
     );
+  }
+
+  function canShowDeleteButton(user: User) {
+    if (!sessionUser) return false;
+    if (sessionUser.role !== "admin") return false;
+    if (user.username === "admin") return false;
+    if (user._id === sessionUser._id) return false;
+    return true;
+  }
+
+  function canShowChangePasswordButton() {
+    if (!sessionUser) return false;
+    return sessionUser.role === "admin";
   }
 
   return (
     <div className="min-h-screen bg-slate-100 p-4 md:p-8">
       <div className="mx-auto max-w-6xl space-y-6">
-                <header className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+        <header className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
           <div>
             <h1 className="text-2xl font-bold text-slate-900">
               Usuarios y permisos
             </h1>
             <p className="text-sm text-slate-600">
-              Administra cajeros, roles y acceso a módulos
-              del sistema.
+              Administra cajeros, roles y acceso a módulos del sistema.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -273,11 +405,11 @@ export default function UsersAdminPage() {
           </div>
         </header>
 
-        {/* Crear usuario */}
         <section className="rounded-xl bg-white p-4 shadow-md md:p-6">
-          <h2 className="text-sm font-semibold text-slate-800 mb-3">
+          <h2 className="mb-3 text-sm font-semibold text-slate-800">
             Nuevo usuario
           </h2>
+
           <form
             onSubmit={handleCreateUser}
             className="grid gap-4 md:grid-cols-4 md:items-end"
@@ -298,6 +430,7 @@ export default function UsersAdminPage() {
                 }
               />
             </div>
+
             <div>
               <label className="mb-1 block text-xs font-medium text-slate-700">
                 Contraseña
@@ -314,29 +447,25 @@ export default function UsersAdminPage() {
                 }
               />
             </div>
+
             <div>
               <label className="mb-1 block text-xs font-medium text-slate-700">
                 Rol
               </label>
               <select
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 bg-white"
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                 value={newUser.role}
                 onChange={(e) =>
-                  handleNewRoleChange(
-                    e.target.value as UserRole
-                  )
+                  handleNewRoleChange(e.target.value as UserRole)
                 }
               >
                 <option value="admin">Admin</option>
-                <option value="supervisor">
-                  Supervisor
-                </option>
-                <option value="encargado">
-                  Encargado
-                </option>
+                <option value="supervisor">Supervisor</option>
+                <option value="encargado">Encargado</option>
                 <option value="cajero">Cajero</option>
               </select>
             </div>
+
             <div className="flex items-center gap-3">
               <div className="flex items-center gap-2">
                 <input
@@ -358,45 +487,40 @@ export default function UsersAdminPage() {
                   Activo
                 </label>
               </div>
+
               <button
                 type="submit"
                 disabled={creating}
-                className="ml-auto rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-slate-800 disabled:bg-slate-500 disabled:cursor-not-allowed"
+                className="ml-auto rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-500"
               >
-                {creating
-                  ? "Creando..."
-                  : "Crear usuario"}
+                {creating ? "Creando..." : "Crear usuario"}
               </button>
             </div>
           </form>
+
           <p className="mt-2 text-[10px] text-slate-500">
-            El rol define permisos base, que puedes ajustar
-            abajo usuario por usuario.
+            El rol define permisos base, que puedes ajustar abajo usuario por
+            usuario.
           </p>
         </section>
 
         {error && (
-          <div className="rounded-md bg-red-100 px-4 py-2 text-xs text-red-700 border border-red-200">
+          <div className="rounded-md border border-red-200 bg-red-100 px-4 py-2 text-xs text-red-700">
             {error}
           </div>
         )}
 
         {success && (
-          <div className="rounded-md bg-emerald-100 px-4 py-2 text-xs text-emerald-800 border border-emerald-200">
+          <div className="rounded-md border border-emerald-200 bg-emerald-100 px-4 py-2 text-xs text-emerald-800">
             {success}
           </div>
         )}
 
-        {/* Lista de usuarios */}
         <section className="rounded-xl bg-white p-4 shadow-md md:p-6">
           <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-slate-800">
-              Usuarios
-            </h2>
+            <h2 className="text-sm font-semibold text-slate-800">Usuarios</h2>
             {loading && (
-              <span className="text-[11px] text-slate-500">
-                Cargando...
-              </span>
+              <span className="text-[11px] text-slate-500">Cargando...</span>
             )}
           </div>
 
@@ -409,23 +533,14 @@ export default function UsersAdminPage() {
               <table className="min-w-full text-[11px]">
                 <thead className="border-b border-slate-200 bg-slate-50">
                   <tr>
-                    <th className="px-2 py-2 text-left">
-                      Usuario
-                    </th>
-                    <th className="px-2 py-2 text-left">
-                      Rol
-                    </th>
-                    <th className="px-2 py-2 text-left">
-                      Permisos
-                    </th>
-                    <th className="px-2 py-2 text-center">
-                      Activo
-                    </th>
-                    <th className="px-2 py-2 text-right">
-                      Acciones
-                    </th>
+                    <th className="px-2 py-2 text-left">Usuario</th>
+                    <th className="px-2 py-2 text-left">Rol</th>
+                    <th className="px-2 py-2 text-left">Permisos</th>
+                    <th className="px-2 py-2 text-center">Activo</th>
+                    <th className="px-2 py-2 text-right">Acciones</th>
                   </tr>
                 </thead>
+
                 <tbody>
                   {users.map((u) => (
                     <tr
@@ -433,14 +548,10 @@ export default function UsersAdminPage() {
                       className="border-b border-slate-100 last:border-0"
                     >
                       <td className="px-2 py-2">
-                        <div className="font-semibold">
-                          {u.username}
-                        </div>
+                        <div className="font-semibold">{u.username}</div>
                         <div className="text-[10px] text-slate-500">
                           Alta:{" "}
-                          {new Date(
-                            u.createdAt
-                          ).toLocaleString("es-MX", {
+                          {new Date(u.createdAt).toLocaleString("es-MX", {
                             year: "2-digit",
                             month: "2-digit",
                             day: "2-digit",
@@ -449,64 +560,33 @@ export default function UsersAdminPage() {
                           })}
                         </div>
                       </td>
+
                       <td className="px-2 py-2">
                         <select
                           className="rounded border border-slate-300 bg-white px-2 py-1 text-[11px] outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                           value={u.role}
                           onChange={(e) =>
-                            changeUserRole(
-                              u._id,
-                              e.target
-                                .value as UserRole
-                            )
+                            changeUserRole(u._id, e.target.value as UserRole)
                           }
                         >
-                          <option value="admin">
-                            Admin
-                          </option>
-                          <option value="supervisor">
-                            Supervisor
-                          </option>
-                          <option value="encargado">
-                            Encargado
-                          </option>
-                          <option value="cajero">
-                            Cajero
-                          </option>
+                          <option value="admin">Admin</option>
+                          <option value="supervisor">Supervisor</option>
+                          <option value="encargado">Encargado</option>
+                          <option value="cajero">Cajero</option>
                         </select>
                       </td>
+
                       <td className="px-2 py-2">
                         <div className="grid grid-cols-2 gap-x-2 gap-y-1">
                           {(
                             [
-                              [
-                                "canSell",
-                                "Vender",
-                              ],
-                              [
-                                "canManageProducts",
-                                "Productos",
-                              ],
-                              [
-                                "canSeeReports",
-                                "Reportes",
-                              ],
-                              [
-                                "canDoCashCuts",
-                                "Corte caja",
-                              ],
-                              [
-                                "canCancelSales",
-                                "Cancelar",
-                              ],
-                              [
-                                "canManageUsers",
-                                "Usuarios",
-                              ],
-                              [
-                                "canAccessConfig",
-                                "Config.",
-                              ],
+                              ["canSell", "Vender"],
+                              ["canManageProducts", "Productos"],
+                              ["canSeeReports", "Reportes"],
+                              ["canDoCashCuts", "Corte caja"],
+                              ["canCancelSales", "Cancelar"],
+                              ["canManageUsers", "Usuarios"],
+                              ["canAccessConfig", "Config."],
                             ] as [keyof Permissions, string][]
                           ).map(([key, label]) => (
                             <label
@@ -516,51 +596,68 @@ export default function UsersAdminPage() {
                               <input
                                 type="checkbox"
                                 className="h-3 w-3 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                                checked={
-                                  u.permissions[key]
-                                }
-                                onChange={() =>
-                                  togglePermission(
-                                    u._id,
-                                    key
-                                  )
-                                }
+                                checked={u.permissions[key]}
+                                onChange={() => togglePermission(u._id, key)}
                               />
                               <span>{label}</span>
                             </label>
                           ))}
                         </div>
                       </td>
+
                       <td className="px-2 py-2 text-center">
                         <button
                           type="button"
-                          onClick={() =>
-                            toggleUserActive(u._id)
-                          }
+                          onClick={() => toggleUserActive(u._id)}
                           className={`rounded-full px-3 py-1 text-[10px] font-semibold ${
                             u.isActive
                               ? "bg-emerald-100 text-emerald-700"
                               : "bg-slate-200 text-slate-600"
                           }`}
                         >
-                          {u.isActive
-                            ? "Activo"
-                            : "Inactivo"}
+                          {u.isActive ? "Activo" : "Inactivo"}
                         </button>
                       </td>
+
                       <td className="px-2 py-2 text-right">
-                        <button
-                          type="button"
-                          disabled={savingId === u._id}
-                          onClick={() =>
-                            handleUpdateUser(u)
-                          }
-                          className="rounded-lg bg-slate-900 px-3 py-1.5 text-[11px] font-semibold text-white shadow hover:bg-slate-800 disabled:bg-slate-500 disabled:cursor-not-allowed"
-                        >
-                          {savingId === u._id
-                            ? "Guardando..."
-                            : "Guardar cambios"}
-                        </button>
+                        <div className="flex justify-end gap-2">
+                          <button
+                            type="button"
+                            disabled={savingId === u._id}
+                            onClick={() => handleUpdateUser(u)}
+                            className="rounded-lg bg-slate-900 px-3 py-1.5 text-[11px] font-semibold text-white shadow hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-500"
+                          >
+                            {savingId === u._id
+                              ? "Guardando..."
+                              : "Guardar cambios"}
+                          </button>
+
+                          {canShowChangePasswordButton() && (
+                            <button
+                              type="button"
+                              disabled={changingPasswordId === u._id}
+                              onClick={() => handleChangePassword(u)}
+                              className="rounded-lg bg-amber-500 px-3 py-1.5 text-[11px] font-semibold text-white shadow hover:bg-amber-600 disabled:cursor-not-allowed disabled:bg-amber-300"
+                            >
+                              {changingPasswordId === u._id
+                                ? "Cambiando..."
+                                : "Cambiar contraseña"}
+                            </button>
+                          )}
+
+                          {canShowDeleteButton(u) && (
+                            <button
+                              type="button"
+                              disabled={deletingId === u._id}
+                              onClick={() => handleDeleteUser(u)}
+                              className="rounded-lg bg-red-600 px-3 py-1.5 text-[11px] font-semibold text-white shadow hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-red-300"
+                            >
+                              {deletingId === u._id
+                                ? "Eliminando..."
+                                : "Eliminar"}
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}
