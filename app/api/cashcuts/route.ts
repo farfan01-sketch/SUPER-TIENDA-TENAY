@@ -6,15 +6,15 @@ import { Config } from "@/lib/models/Config";
 import { parseSessionCookie } from "@/lib/auth";
 
 function buildCashCutFolio(lastFolio?: string | null) {
-  // Formato: CC-000001, CC-000002, etc.
   if (!lastFolio) return "CC-000001";
+
   const match = lastFolio.match(/(\d+)$/);
   if (!match) return "CC-000001";
+
   const num = parseInt(match[1], 10) + 1;
   return `CC-${num.toString().padStart(6, "0")}`;
 }
 
-// GET: lista de cortes
 export async function GET(req: NextRequest) {
   try {
     await connectDB();
@@ -31,6 +31,7 @@ export async function GET(req: NextRequest) {
         $gte: new Date(from),
       };
     }
+
     if (to) {
       filter.createdAt = {
         ...(filter.createdAt || {}),
@@ -45,6 +46,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(cuts);
   } catch (error: any) {
     console.error("Error en GET /api/cashcuts:", error);
+
     return NextResponse.json(
       {
         message: "Error al obtener cortes de caja",
@@ -55,7 +57,6 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// POST: generar corte desde última fecha hasta ahora
 export async function POST(req: NextRequest) {
   try {
     await connectDB();
@@ -73,31 +74,35 @@ export async function POST(req: NextRequest) {
     const body = await req.json().catch(() => ({}));
     const { notes } = body as { notes?: string };
 
-    // 1. Buscar último corte
     const lastCut = await CashCut.findOne()
       .sort({ rangeEnd: -1 })
       .lean();
 
     const rangeStart = lastCut?.rangeEnd
       ? new Date(lastCut.rangeEnd)
-      : new Date(0); // desde el inicio
+      : new Date(0);
 
     const rangeEnd = new Date();
 
-    // 2. Traer ventas completadas en ese rango
-    const sales = await Sale.find({
-      status: { $ne: "cancelled" },
+    const allSales = await Sale.find({
       createdAt: {
         $gt: rangeStart,
         $lte: rangeEnd,
       },
     }).lean();
 
-    if (!sales || sales.length === 0) {
+    const activeSales = (allSales as any[]).filter(
+      (sale) => sale.status !== "cancelled"
+    );
+
+    const cancelledSales = (allSales as any[]).filter(
+      (sale) => sale.status === "cancelled"
+    );
+
+    if (!activeSales || activeSales.length === 0) {
       return NextResponse.json(
         {
-          message:
-            "No hay ventas nuevas desde el último corte",
+          message: "No hay ventas nuevas desde el último corte",
         },
         { status: 400 }
       );
@@ -106,10 +111,13 @@ export async function POST(req: NextRequest) {
     let totalSales = 0;
     let totalDiscounts = 0;
     let totalCost = 0;
-    let saleCount = sales.length;
-    const paymentMap = new Map<string, number>();
 
-    for (const sale of sales as any[]) {
+    const totalsByMethod: Record<
+      string,
+      { total: number; count: number }
+    > = {};
+
+    for (const sale of activeSales) {
       const saleTotal = Number(sale.total || 0);
       const discount = Number(sale.discount || 0);
       const items = sale.items || [];
@@ -124,45 +132,84 @@ export async function POST(req: NextRequest) {
         totalCost += cost * qty;
       }
 
-      for (const p of payments) {
-        const method = String(p.method || "SIN MÉTODO");
-        const amount = Number(p.amount || 0);
-        paymentMap.set(
-          method,
-          (paymentMap.get(method) || 0) + amount
-        );
+      for (const payment of payments) {
+        const method = String(payment.method || "SIN MÉTODO");
+        const amount = Number(payment.amount || 0);
+
+        if (!totalsByMethod[method]) {
+          totalsByMethod[method] = {
+            total: 0,
+            count: 0,
+          };
+        }
+
+        totalsByMethod[method].total += amount;
+        totalsByMethod[method].count += 1;
       }
     }
 
     const netSales = totalSales - totalDiscounts;
     const profit = netSales - totalCost;
 
-    const payments = Array.from(paymentMap.entries()).map(
-      ([method, amount]) => ({ method, amount })
+    const cancelledSalesCount = cancelledSales.length;
+    const cancelledSalesTotal = cancelledSales.reduce(
+      (acc, sale: any) => acc + Number(sale.total || 0),
+      0
     );
 
-    // 3. Generar folio de corte
+    const efectivoVentas =
+      Object.entries(totalsByMethod).reduce((acc, [method, info]) => {
+        if (method.toLowerCase().trim() === "efectivo") {
+          return acc + Number(info.total || 0);
+        }
+        return acc;
+      }, 0);
+
+    const openingAmount = 0;
+    const closingAmount = efectivoVentas;
+    const expectedCash = openingAmount + efectivoVentas;
+    const difference = closingAmount - expectedCash;
+
     const lastFolio =
-      lastCut?.folio || (await CashCut.findOne().sort({ folio: -1 }).lean())?.folio;
+      lastCut?.folio ||
+      (await CashCut.findOne().sort({ folio: -1 }).lean())?.folio;
+
     const folio = buildCashCutFolio(lastFolio);
 
     const cut = await CashCut.create({
       folio,
       rangeStart,
       rangeEnd,
+
+      openingAmount,
+      closingAmount,
+      expectedCash,
+      difference,
+
       totalSales,
       totalDiscounts,
       netSales,
       totalCost,
       profit,
-      payments,
-      saleCount,
+
+      salesCount: activeSales.length,
+      saleCount: activeSales.length,
+
+      cancelledSalesCount,
+      cancelledSalesTotal,
+
+      totalsByMethod,
+
+      payments: Object.entries(totalsByMethod).map(([method, info]) => ({
+        method,
+        amount: info.total,
+      })),
+
       userId: session._id,
       username: session.username,
       notes: notes || "",
     });
 
-    // 4. Devolver corte + config (por si quieres para impresión inmediata)
     const config = await Config.findOne({
       singletonKey: "main",
     }).lean();
@@ -177,6 +224,7 @@ export async function POST(req: NextRequest) {
     );
   } catch (error: any) {
     console.error("Error en POST /api/cashcuts:", error);
+
     return NextResponse.json(
       {
         message: "Error al generar corte de caja",

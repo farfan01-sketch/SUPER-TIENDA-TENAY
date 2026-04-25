@@ -6,12 +6,75 @@ import { Customer } from "@/lib/models/Customer";
 import { parseSessionCookie } from "@/lib/auth";
 
 function buildSaleFolio(lastFolio?: string | null) {
-  // Formato: FA-000001, FA-000002, etc.
   if (!lastFolio) return "FA-000001";
   const match = lastFolio.match(/(\d+)$/);
   if (!match) return "FA-000001";
   const num = parseInt(match[1], 10) + 1;
   return `FA-${num.toString().padStart(6, "0")}`;
+}
+
+function isCashMethod(method: string) {
+  return method?.toLowerCase().trim() === "efectivo";
+}
+
+function isCreditMethod(method: string) {
+  return method?.toLowerCase().trim() === "crédito";
+}
+
+function normalizePayments(
+  payments: { method: string; amount: number }[],
+  total: number
+) {
+  const cleanPayments = payments.map((p) => ({
+    method: p.method,
+    amount: Number(p.amount || 0),
+  }));
+
+  const cashIndex = cleanPayments.findIndex((p) => isCashMethod(p.method));
+
+  if (cashIndex >= 0 && cleanPayments[cashIndex].amount === 0) {
+    const nonCashTotal = cleanPayments
+      .filter((_, index) => index !== cashIndex)
+      .reduce((acc, p) => acc + Number(p.amount || 0), 0);
+
+    const remaining = Number(total || 0) - nonCashTotal;
+    cleanPayments[cashIndex].amount = remaining > 0 ? remaining : 0;
+  }
+
+  const totalPaid = cleanPayments.reduce(
+    (acc, p) => acc + Number(p.amount || 0),
+    0
+  );
+
+  const hasCash = cleanPayments.some((p) => isCashMethod(p.method));
+
+  if (!hasCash && Math.abs(totalPaid - total) > 0.01) {
+    return {
+      ok: false,
+      payments: cleanPayments,
+      totalPaid,
+      change: 0,
+      message: "La suma de las formas de pago debe coincidir con el total",
+    };
+  }
+
+  if (hasCash && totalPaid < total) {
+    return {
+      ok: false,
+      payments: cleanPayments,
+      totalPaid,
+      change: 0,
+      message: "El pago recibido es menor al total",
+    };
+  }
+
+  return {
+    ok: true,
+    payments: cleanPayments,
+    totalPaid,
+    change: hasCash ? Math.max(totalPaid - Number(total || 0), 0) : 0,
+    message: "Pagos correctos",
+  };
 }
 
 export async function GET(req: NextRequest) {
@@ -29,7 +92,6 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json(sales);
   } catch (error: any) {
-    console.error("Error en GET /api/sales:", error);
     return NextResponse.json(
       {
         message: "Error al obtener ventas",
@@ -48,6 +110,7 @@ export async function POST(req: NextRequest) {
     const session = parseSessionCookie(raw);
 
     const body = await req.json();
+
     const {
       items,
       subtotal,
@@ -56,9 +119,11 @@ export async function POST(req: NextRequest) {
       payments,
       customerId,
       customerName,
+      shiftId,
     } = body as {
       items: {
         productId?: string;
+        variantId?: string;
         name: string;
         variantText?: string;
         quantity: number;
@@ -72,6 +137,7 @@ export async function POST(req: NextRequest) {
       payments: { method: string; amount: number }[];
       customerId?: string;
       customerName?: string;
+      shiftId?: string;
     };
 
     if (!items || !Array.isArray(items) || items.length === 0) {
@@ -88,70 +154,82 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const totalPayments = payments.reduce(
-      (acc, p) => acc + Number(p.amount || 0),
-      0
-    );
+    const normalized = normalizePayments(payments, Number(total || 0));
 
-    if (Math.abs(totalPayments - total) > 0.01) {
+    if (!normalized.ok) {
       return NextResponse.json(
         {
-          message:
-            "La suma de las formas de pago no coincide con el total",
+          message: normalized.message,
+          total,
+          totalPaid: normalized.totalPaid,
+          change: normalized.change,
         },
         { status: 400 }
       );
     }
 
-    // Generar folio FA-xxxxx
-    const lastSale = await Sale.findOne({})
-      .sort({ folio: -1 })
-      .lean();
+    const creditAmount = normalized.payments
+      .filter((p) => isCreditMethod(p.method))
+      .reduce((acc, p) => acc + Number(p.amount || 0), 0);
+
+    if (creditAmount > 0 && !customerId) {
+      return NextResponse.json(
+        { message: "Para usar crédito debes seleccionar un cliente" },
+        { status: 400 }
+      );
+    }
+
+    const lastSale = await Sale.findOne({}).sort({ folio: -1 }).lean();
     const folio = buildSaleFolio(lastSale?.folio);
+    const cashierName = session?.username || "Cajero";
 
-     const cashierName = session?.username || "Cajero";
-
-    // Crear venta
     const sale = await (Sale as any).create({
       folio,
       items,
       subtotal,
       discount: Number(discount || 0),
       total,
-      payments,
+      payments: normalized.payments,
+      totalPaid: normalized.totalPaid,
+      change: normalized.change,
       customerId: customerId || undefined,
       customerName: customerName || undefined,
       cashier: cashierName,
+      shiftId: shiftId || undefined,
       status: "completed",
     });
 
-    // Actualizar inventario (restar stock)
     for (const item of items) {
       if (!item.productId) continue;
-      await Product.findByIdAndUpdate(item.productId, {
-        $inc: { stock: -Math.abs(item.quantity) },
-      }).exec();
+
+      const qty = Math.abs(Number(item.quantity || 0));
+
+      if (item.variantId) {
+        await Product.updateOne(
+          {
+            _id: item.productId,
+            "variants._id": item.variantId,
+          },
+          {
+            $inc: {
+              "variants.$.stock": -qty,
+            },
+          }
+        ).exec();
+      } else {
+        await Product.findByIdAndUpdate(item.productId, {
+          $inc: { stock: -qty },
+        }).exec();
+      }
     }
 
-    // Lógica de crédito: si hay pago "Crédito" y cliente
-    if (customerId) {
-      const creditAmount = payments
-        .filter(
-          (p) => p.method && p.method.toLowerCase() === "crédito"
-        )
-        .reduce(
-          (acc, p) => acc + Number(p.amount || 0),
-          0
-        );
+    if (customerId && creditAmount > 0) {
+      const customer = await Customer.findById(customerId);
 
-      if (creditAmount > 0) {
-        const customer = await Customer.findById(customerId);
-        if (customer) {
-          customer.currentBalance =
-            Number(customer.currentBalance || 0) +
-            creditAmount;
-          await customer.save();
-        }
+      if (customer) {
+        customer.currentBalance =
+          Number(customer.currentBalance || 0) + creditAmount;
+        await customer.save();
       }
     }
 
@@ -164,6 +242,7 @@ export async function POST(req: NextRequest) {
     );
   } catch (error: any) {
     console.error("Error en POST /api/sales:", error);
+
     return NextResponse.json(
       {
         message: "Error al registrar venta",

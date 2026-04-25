@@ -3,6 +3,7 @@ import {
   model,
   models,
   type Document,
+  Types,
 } from "mongoose";
 
 export type CashCutTotalsByMethod = {
@@ -14,19 +15,21 @@ export type CashCutTotalsByMethod = {
 
 export interface ICashCut extends Document {
   folio: string;
+  shiftId?: Types.ObjectId;
+  username?: string;
   rangeStart: Date;
   rangeEnd: Date;
-  openingAmount: number;       // Monto de apertura
-  closingAmount: number;       // Efectivo real al cierre
-  expectedCash: number;        // Efectivo esperado (según ventas)
-  difference: number;          // closingAmount - expectedCash
-  totalSales: number;          // Total vendido
-  totalCost: number;           // Costo de lo vendido
-  profit: number;              // Utilidad
-  salesCount: number;          // Número de ventas
-  cancelledSalesCount: number; // Ventas canceladas
-  cancelledSalesTotal: number; // Monto total cancelado
-  totalsByMethod: CashCutTotalsByMethod; // Totales por forma de pago
+  openingAmount: number;
+  closingAmount: number;
+  expectedCash: number;
+  difference: number;
+  totalSales: number;
+  totalCost: number;
+  profit: number;
+  salesCount: number;
+  cancelledSalesCount: number;
+  cancelledSalesTotal: number;
+  totalsByMethod: CashCutTotalsByMethod;
   notes?: string;
   createdAt: Date;
   updatedAt: Date;
@@ -35,6 +38,18 @@ export interface ICashCut extends Document {
 const CashCutSchema = new Schema<ICashCut>(
   {
     folio: { type: String, required: true, unique: true },
+
+    shiftId: {
+      type: Schema.Types.ObjectId,
+      ref: "Shift",
+      index: true,
+    },
+
+    username: {
+      type: String,
+      trim: true,
+    },
+
     rangeStart: { type: Date, required: true },
     rangeEnd: { type: Date, required: true },
 
@@ -59,9 +74,7 @@ const CashCutSchema = new Schema<ICashCut>(
 
     notes: { type: String },
   },
-  {
-    timestamps: true,
-  }
+  { timestamps: true }
 );
 
 export const CashCut =

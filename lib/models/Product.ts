@@ -1,11 +1,12 @@
 import mongoose, { Schema, Model, Document } from "mongoose";
 
 export interface IVariant {
+  _id?: mongoose.Types.ObjectId;
   kind: "ropa" | "maquillaje" | "perfume";
-  size?: string;   // ropa
-  color?: string;  // ropa
-  tone?: string;   // labial / rubor
-  scent?: string;  // perfume
+  size?: string;
+  color?: string;
+  tone?: string;
+  scent?: string;
   cost: number;
   priceRetail: number;
   priceWholesale?: number;
@@ -17,14 +18,15 @@ export interface IProduct extends Document {
   sku: string;
   barcode?: string;
   category?: string;
-  imageUrl?: string;      // base64 de la imagen
-  cost: number;           // costo general (para productos sin variantes)
-  priceRetail: number;    // precio general
+  imageUrl?: string;
+  useVariants: boolean;
+  cost: number;
+  priceRetail: number;
   priceWholesale?: number;
-  stock: number;          // stock general
+  stock: number;
   minStock?: number;
   isActive: boolean;
-  variants: IVariant[];   // variantes por tipo
+  variants: IVariant[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -40,12 +42,12 @@ const VariantSchema = new Schema<IVariant>(
     color: { type: String },
     tone: { type: String },
     scent: { type: String },
-    cost: { type: Number, required: true },
-    priceRetail: { type: Number, required: true },
-    priceWholesale: { type: Number },
+    cost: { type: Number, required: true, default: 0 },
+    priceRetail: { type: Number, required: true, default: 0 },
+    priceWholesale: { type: Number, default: 0 },
     stock: { type: Number, required: true, default: 0 },
   },
-  { _id: false }
+  { _id: true }
 );
 
 const ProductSchema = new Schema<IProduct>(
@@ -55,12 +57,16 @@ const ProductSchema = new Schema<IProduct>(
     barcode: { type: String },
     category: { type: String },
     imageUrl: { type: String },
-    cost: { type: Number, required: true },
-    priceRetail: { type: Number, required: true },
-    priceWholesale: { type: Number },
+
+    useVariants: { type: Boolean, default: false },
+
+    cost: { type: Number, required: true, default: 0 },
+    priceRetail: { type: Number, required: true, default: 0 },
+    priceWholesale: { type: Number, default: 0 },
     stock: { type: Number, default: 0 },
     minStock: { type: Number, default: 0 },
     isActive: { type: Boolean, default: true },
+
     variants: { type: [VariantSchema], default: [] },
   },
   { timestamps: true }

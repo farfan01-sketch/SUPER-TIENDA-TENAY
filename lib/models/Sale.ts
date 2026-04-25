@@ -4,6 +4,7 @@ export interface ISaleItem {
   productId?: mongoose.Types.ObjectId;
   name: string;
   variantText?: string;
+  variantId?: mongoose.Types.ObjectId;
   quantity: number;
   price: number;
   cost?: number;
@@ -11,7 +12,7 @@ export interface ISaleItem {
 }
 
 export interface ISalePayment {
-  method: string; // Efectivo, Tarjeta, Crédito, etc.
+  method: string;
   amount: number;
 }
 
@@ -24,16 +25,14 @@ export interface ISale extends Document {
   discount: number;
   total: number;
   payments: ISalePayment[];
-
-  // Crédito
+  totalPaid?: number;
+  change?: number;
   customerId?: mongoose.Types.ObjectId;
   customerName?: string;
-
-  // Caja / control
   cashier?: string;
+  shiftId?: mongoose.Types.ObjectId;
   status: SaleStatus;
   cancelReason?: string;
-
   createdAt: Date;
   updatedAt: Date;
 }
@@ -43,6 +42,7 @@ const SaleItemSchema = new Schema<ISaleItem>(
     productId: { type: Schema.Types.ObjectId, ref: "Product" },
     name: { type: String, required: true },
     variantText: { type: String },
+    variantId: { type: Schema.Types.ObjectId },
     quantity: { type: Number, required: true },
     price: { type: Number, required: true },
     cost: { type: Number },
@@ -61,36 +61,28 @@ const SalePaymentSchema = new Schema<ISalePayment>(
 
 const SaleSchema = new Schema<ISale>(
   {
-    folio: {
-      type: String,
-      required: true,
-      unique: true,
-    },
+    folio: { type: String, required: true, unique: true },
     items: {
       type: [SaleItemSchema],
       default: [],
-      validate: {
-        validator: (v: ISaleItem[]) => v.length > 0,
-        message: "La venta debe tener al menos un producto",
-      },
     },
     subtotal: { type: Number, required: true },
     discount: { type: Number, default: 0 },
     total: { type: Number, required: true },
-    payments: {
-      type: [SalePaymentSchema],
-      default: [],
-    },
+    payments: { type: [SalePaymentSchema], default: [] },
+    totalPaid: { type: Number, default: 0 },
+    change: { type: Number, default: 0 },
 
-    // Cliente (crédito)
-    customerId: {
-      type: Schema.Types.ObjectId,
-      ref: "Customer",
-    },
+    customerId: { type: Schema.Types.ObjectId, ref: "Customer" },
     customerName: { type: String },
 
-    // Control
     cashier: { type: String },
+    shiftId: {
+      type: Schema.Types.ObjectId,
+      ref: "Shift",
+      index: true,
+    },
+
     status: {
       type: String,
       enum: ["completed", "cancelled"],
@@ -102,5 +94,4 @@ const SaleSchema = new Schema<ISale>(
 );
 
 export const Sale: Model<ISale> =
-  mongoose.models.Sale ||
-  mongoose.model<ISale>("Sale", SaleSchema);
+  mongoose.models.Sale || mongoose.model<ISale>("Sale", SaleSchema);

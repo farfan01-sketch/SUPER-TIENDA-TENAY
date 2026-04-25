@@ -1,16 +1,12 @@
 "use client";
 
-import {
-  useEffect,
-  useState,
-  FormEvent,
-  ChangeEvent,
-} from "react";
+import { useEffect, useState, FormEvent, ChangeEvent } from "react";
 import Link from "next/link";
 
 type VariantKind = "ropa" | "maquillaje" | "perfume";
 
 type Variant = {
+  _id?: string;
   kind: VariantKind;
   size?: string;
   color?: string;
@@ -29,6 +25,7 @@ type Product = {
   barcode?: string;
   category?: string;
   imageUrl?: string;
+  useVariants: boolean;
   cost: number;
   priceRetail: number;
   priceWholesale?: number;
@@ -38,6 +35,34 @@ type Product = {
   variants: Variant[];
 };
 
+const emptyProduct: Product = {
+  name: "",
+  sku: "",
+  barcode: "",
+  category: "",
+  imageUrl: "",
+  useVariants: false,
+  cost: 0,
+  priceRetail: 0,
+  priceWholesale: 0,
+  stock: 0,
+  minStock: 0,
+  isActive: true,
+  variants: [],
+};
+
+const emptyVariant: Variant = {
+  kind: "ropa",
+  size: "",
+  color: "",
+  tone: "",
+  scent: "",
+  cost: 0,
+  priceRetail: 0,
+  priceWholesale: 0,
+  stock: 0,
+};
+
 export default function ProductsPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(false);
@@ -45,40 +70,31 @@ export default function ProductsPage() {
   const [error, setError] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
 
-  const [form, setForm] = useState<Product>({
-    name: "",
-    sku: "",
-    barcode: "",
-    category: "",
-    imageUrl: "",
-    cost: 0,
-    priceRetail: 0,
-    priceWholesale: 0,
-    stock: 0,
-    minStock: 0,
-    isActive: true,
-    variants: [],
-  });
-
-  const [variantForm, setVariantForm] = useState<Variant>({
-    kind: "ropa",
-    size: "",
-    color: "",
-    tone: "",
-    scent: "",
-    cost: 0,
-    priceRetail: 0,
-    priceWholesale: 0,
-    stock: 0,
-  });
+  const [form, setForm] = useState<Product>(emptyProduct);
+  const [variantForm, setVariantForm] = useState<Variant>(emptyVariant);
 
   async function loadProducts() {
     try {
       setLoading(true);
-      const res = await fetch("/api/products");
-      if (!res.ok) throw new Error("No se pudo cargar productos");
+      setError(null);
+
+      const res = await fetch("/api/products", {
+        cache: "no-store",
+      });
+
+      if (!res.ok) {
+        throw new Error("No se pudo cargar productos");
+      }
+
       const data = await res.json();
-      setProducts(data);
+
+      setProducts(
+        data.map((p: any) => ({
+          ...p,
+          useVariants: Boolean(p.useVariants),
+          variants: p.variants || [],
+        }))
+      );
     } catch (e: any) {
       setError(e.message || "Error al cargar productos");
     } finally {
@@ -91,31 +107,8 @@ export default function ProductsPage() {
   }, []);
 
   function resetForm() {
-    setForm({
-      name: "",
-      sku: "",
-      barcode: "",
-      category: "",
-      imageUrl: "",
-      cost: 0,
-      priceRetail: 0,
-      priceWholesale: 0,
-      stock: 0,
-      minStock: 0,
-      isActive: true,
-      variants: [],
-    });
-    setVariantForm({
-      kind: "ropa",
-      size: "",
-      color: "",
-      tone: "",
-      scent: "",
-      cost: 0,
-      priceRetail: 0,
-      priceWholesale: 0,
-      stock: 0,
-    });
+    setForm(emptyProduct);
+    setVariantForm(emptyVariant);
     setEditingId(null);
   }
 
@@ -124,70 +117,124 @@ export default function ProductsPage() {
     if (!file) return;
 
     const reader = new FileReader();
+
     reader.onloadend = () => {
-      const result = reader.result as string;
-      setForm((prev) => ({ ...prev, imageUrl: result }));
+      setForm((prev) => ({
+        ...prev,
+        imageUrl: reader.result as string,
+      }));
     };
+
     reader.readAsDataURL(file);
   }
 
+  function getVariantLabel(v: Variant) {
+    if (v.kind === "ropa") {
+      return `${v.size || "-"} ${v.color || ""}`.trim();
+    }
+
+    if (v.kind === "maquillaje") {
+      return `Tono ${v.tone || "-"}`;
+    }
+
+    return `Aroma ${v.scent || "-"}`;
+  }
+
   function addVariant() {
+    setError(null);
+
+    if (!form.useVariants) {
+      setError("Primero activa el botón de variantes.");
+      return;
+    }
+
     if (
       !variantForm.size &&
       !variantForm.color &&
       !variantForm.tone &&
       !variantForm.scent
     ) {
+      setError("Agrega el detalle de la variante.");
       return;
     }
 
-    setForm({
-      ...form,
-      variants: [...form.variants, { ...variantForm }],
-    });
+    if (Number(variantForm.priceRetail || 0) <= 0) {
+      setError("La variante debe tener precio menudeo.");
+      return;
+    }
+
+    setForm((prev) => ({
+      ...prev,
+      variants: [...prev.variants, { ...variantForm }],
+    }));
 
     setVariantForm({
+      ...emptyVariant,
       kind: variantForm.kind,
-      size: "",
-      color: "",
-      tone: "",
-      scent: "",
-      cost: 0,
-      priceRetail: 0,
-      priceWholesale: 0,
-      stock: 0,
     });
+  }
+
+  function removeVariant(index: number) {
+    setForm((prev) => ({
+      ...prev,
+      variants: prev.variants.filter((_, i) => i !== index),
+    }));
   }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
 
-    if (!form.name || !form.sku || !form.cost || !form.priceRetail) {
-      setError("Nombre, SKU, costo y precio son obligatorios");
+    if (!form.name.trim() || !form.sku.trim()) {
+      setError("Nombre y SKU son obligatorios.");
+      return;
+    }
+
+    if (!form.useVariants) {
+      if (Number(form.cost || 0) <= 0 || Number(form.priceRetail || 0) <= 0) {
+        setError("Costo y precio son obligatorios para productos sin variantes.");
+        return;
+      }
+    }
+
+    if (form.useVariants && form.variants.length === 0) {
+      setError("Si activas variantes, debes agregar al menos una variante.");
       return;
     }
 
     try {
       setSaving(true);
 
-      const url = editingId
-        ? `/api/products?id=${editingId}`
-        : "/api/products";
+      const productToSave: Product = {
+        ...form,
+        cost: Number(form.cost || 0),
+        priceRetail: Number(form.priceRetail || 0),
+        priceWholesale: Number(form.priceWholesale || 0),
+        stock: Number(form.stock || 0),
+        minStock: Number(form.minStock || 0),
+        variants: form.useVariants
+          ? form.variants.map((v) => ({
+              ...v,
+              cost: Number(v.cost || 0),
+              priceRetail: Number(v.priceRetail || 0),
+              priceWholesale: Number(v.priceWholesale || 0),
+              stock: Number(v.stock || 0),
+            }))
+          : [],
+      };
 
+      const url = editingId ? `/api/products?id=${editingId}` : "/api/products";
       const method = editingId ? "PUT" : "POST";
 
       const res = await fetch(url, {
         method,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify(productToSave),
       });
 
       if (!res.ok) {
-        const data = await res.json();
-        throw new Error(
-          data.message || "Error al guardar producto"
-        );
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.message || "Error al guardar producto");
       }
 
       resetForm();
@@ -202,44 +249,45 @@ export default function ProductsPage() {
   function handleEdit(p: Product) {
     setForm({
       _id: p._id,
-      name: p.name,
-      sku: p.sku,
+      name: p.name || "",
+      sku: p.sku || "",
       barcode: p.barcode || "",
       category: p.category || "",
       imageUrl: p.imageUrl || "",
-      cost: p.cost,
-      priceRetail: p.priceRetail,
-      priceWholesale: p.priceWholesale || 0,
-      stock: p.stock,
-      minStock: p.minStock || 0,
-      isActive: p.isActive,
+      useVariants: Boolean(p.useVariants),
+      cost: Number(p.cost || 0),
+      priceRetail: Number(p.priceRetail || 0),
+      priceWholesale: Number(p.priceWholesale || 0),
+      stock: Number(p.stock || 0),
+      minStock: Number(p.minStock || 0),
+      isActive: p.isActive !== false,
       variants: p.variants || [],
     });
+
     setEditingId(p._id || null);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   async function handleDelete(p: Product) {
     if (!p._id) return;
-    const ok = window.confirm(
-      `¿Seguro que deseas eliminar el producto "${p.name}"?`
-    );
+
+    const ok = window.confirm(`¿Eliminar "${p.name}"?`);
     if (!ok) return;
 
     try {
       setSaving(true);
+
       const res = await fetch(`/api/products?id=${p._id}`, {
         method: "DELETE",
       });
+
       if (!res.ok) {
-        const data = await res.json();
-        throw new Error(
-          data.message || "Error al eliminar producto"
-        );
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.message || "Error al eliminar producto");
       }
-      if (editingId === p._id) {
-        resetForm();
-      }
+
+      if (editingId === p._id) resetForm();
+
       await loadProducts();
     } catch (e: any) {
       setError(e.message || "Error al eliminar producto");
@@ -248,19 +296,24 @@ export default function ProductsPage() {
     }
   }
 
+  const variantStockTotal = form.variants.reduce(
+    (acc, v) => acc + Number(v.stock || 0),
+    0
+  );
+
   return (
     <div className="min-h-screen bg-slate-100 p-4 md:p-8">
       <div className="mx-auto max-w-6xl space-y-6">
-                <header className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+        <header className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
           <div>
             <h1 className="text-2xl font-bold text-slate-900">
               Catálogo de productos
             </h1>
             <p className="text-sm text-slate-600">
-              Módulo tipo Ti Sicar / Eleventa para administrar tus
-              productos.
+              Alta, edición y control de productos con o sin variantes.
             </p>
           </div>
+
           <div className="flex items-center gap-2">
             <span className="rounded-full bg-yellow-400 px-3 py-1 text-xs font-semibold text-slate-900 shadow">
               SUPER TIENDA TENAY POS
@@ -275,17 +328,17 @@ export default function ProductsPage() {
         </header>
 
         {error && (
-          <div className="rounded-md bg-red-100 px-4 py-2 text-sm text-red-700">
+          <div className="rounded-md border border-red-200 bg-red-100 px-4 py-2 text-sm text-red-700">
             {error}
           </div>
         )}
 
-        {/* Formulario */}
         <section className="rounded-xl bg-white p-4 shadow-md md:p-6">
           <div className="mb-4 flex items-center justify-between">
             <h2 className="text-lg font-semibold text-slate-800">
               {editingId ? "Modificar producto" : "Nuevo producto"}
             </h2>
+
             {editingId && (
               <button
                 type="button"
@@ -309,9 +362,7 @@ export default function ProductsPage() {
                 type="text"
                 className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                 value={form.name}
-                onChange={(e) =>
-                  setForm({ ...form, name: e.target.value })
-                }
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
               />
             </div>
 
@@ -323,9 +374,7 @@ export default function ProductsPage() {
                 type="text"
                 className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                 value={form.sku}
-                onChange={(e) =>
-                  setForm({ ...form, sku: e.target.value })
-                }
+                onChange={(e) => setForm({ ...form, sku: e.target.value })}
               />
             </div>
 
@@ -337,9 +386,7 @@ export default function ProductsPage() {
                 type="text"
                 className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                 value={form.barcode}
-                onChange={(e) =>
-                  setForm({ ...form, barcode: e.target.value })
-                }
+                onChange={(e) => setForm({ ...form, barcode: e.target.value })}
               />
             </div>
 
@@ -351,13 +398,10 @@ export default function ProductsPage() {
                 type="text"
                 className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                 value={form.category}
-                onChange={(e) =>
-                  setForm({ ...form, category: e.target.value })
-                }
+                onChange={(e) => setForm({ ...form, category: e.target.value })}
               />
             </div>
 
-            {/* Imagen */}
             <div className="md:col-span-2">
               <label className="mb-1 block text-xs font-medium text-slate-700">
                 Imagen del producto
@@ -379,73 +423,70 @@ export default function ProductsPage() {
 
             <div>
               <label className="mb-1 block text-xs font-medium text-slate-700">
-                Costo *
+                Costo general
               </label>
               <input
                 type="number"
                 step="0.01"
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                disabled={form.useVariants}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none disabled:bg-slate-100 disabled:text-slate-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                 value={form.cost}
                 onChange={(e) =>
-                  setForm({
-                    ...form,
-                    cost: Number(e.target.value),
-                  })
+                  setForm({ ...form, cost: Number(e.target.value) })
                 }
               />
             </div>
 
             <div>
               <label className="mb-1 block text-xs font-medium text-slate-700">
-                Precio menudeo *
+                Precio menudeo general
               </label>
               <input
                 type="number"
                 step="0.01"
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                disabled={form.useVariants}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none disabled:bg-slate-100 disabled:text-slate-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                 value={form.priceRetail}
                 onChange={(e) =>
-                  setForm({
-                    ...form,
-                    priceRetail: Number(e.target.value),
-                  })
+                  setForm({ ...form, priceRetail: Number(e.target.value) })
                 }
               />
             </div>
 
             <div>
               <label className="mb-1 block text-xs font-medium text-slate-700">
-                Precio mayoreo
+                Precio mayoreo general
               </label>
               <input
                 type="number"
                 step="0.01"
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                disabled={form.useVariants}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none disabled:bg-slate-100 disabled:text-slate-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                 value={form.priceWholesale}
                 onChange={(e) =>
-                  setForm({
-                    ...form,
-                    priceWholesale: Number(e.target.value),
-                  })
+                  setForm({ ...form, priceWholesale: Number(e.target.value) })
                 }
               />
             </div>
 
             <div>
               <label className="mb-1 block text-xs font-medium text-slate-700">
-                Stock inicial
+                Stock general
               </label>
               <input
                 type="number"
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                disabled={form.useVariants}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none disabled:bg-slate-100 disabled:text-slate-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                 value={form.stock}
                 onChange={(e) =>
-                  setForm({
-                    ...form,
-                    stock: Number(e.target.value),
-                  })
+                  setForm({ ...form, stock: Number(e.target.value) })
                 }
               />
+              {form.useVariants && (
+                <p className="mt-1 text-[10px] text-slate-500">
+                  Con variantes activas, el stock se controla por variante.
+                </p>
+              )}
             </div>
 
             <div>
@@ -457,10 +498,7 @@ export default function ProductsPage() {
                 className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                 value={form.minStock}
                 onChange={(e) =>
-                  setForm({
-                    ...form,
-                    minStock: Number(e.target.value),
-                  })
+                  setForm({ ...form, minStock: Number(e.target.value) })
                 }
               />
             </div>
@@ -471,10 +509,7 @@ export default function ProductsPage() {
                 type="checkbox"
                 checked={form.isActive}
                 onChange={(e) =>
-                  setForm({
-                    ...form,
-                    isActive: e.target.checked,
-                  })
+                  setForm({ ...form, isActive: e.target.checked })
                 }
                 className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
               />
@@ -486,14 +521,56 @@ export default function ProductsPage() {
               </label>
             </div>
 
-            {/* VARIANTES */}
-            <div className="md:col-span-4 border-t pt-4 mt-2">
-              <h3 className="mb-2 text-sm font-semibold text-slate-800">
-                Variantes (ropa / maquillaje / perfume)
-              </h3>
-
-              <div className="mb-3 flex flex-wrap gap-3">
+            <div className="md:col-span-4 rounded-lg border border-blue-200 bg-blue-50 p-4">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                 <div>
+                  <p className="text-sm font-semibold text-slate-900">
+                    Activar variantes
+                  </p>
+                  <p className="text-xs text-slate-600">
+                    Úsalo para ropa, maquillaje o perfume. Al activarlo, la
+                    venta y la existencia se controlan por variante.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setForm((prev) => ({
+                      ...prev,
+                      useVariants: !prev.useVariants,
+                      stock: !prev.useVariants ? 0 : prev.stock,
+                      variants: prev.useVariants ? [] : prev.variants,
+                    }))
+                  }
+                  className={`rounded-full px-4 py-2 text-xs font-bold shadow ${
+                    form.useVariants
+                      ? "bg-emerald-600 text-white hover:bg-emerald-700"
+                      : "bg-slate-900 text-white hover:bg-slate-800"
+                  }`}
+                >
+                  {form.useVariants
+                    ? "Variantes activadas"
+                    : "Activar variantes"}
+                </button>
+              </div>
+
+              {form.useVariants && (
+                <div className="mt-3 rounded-md bg-white p-3 text-xs text-slate-700">
+                  Stock total por variantes:{" "}
+                  <span className="font-bold">{variantStockTotal}</span>{" "}
+                  pieza(s). El POS obligará a vender una variante.
+                </div>
+              )}
+            </div>
+
+            {form.useVariants && (
+              <div className="md:col-span-4 border-t pt-4">
+                <h3 className="mb-2 text-sm font-semibold text-slate-800">
+                  Variantes
+                </h3>
+
+                <div className="mb-3 max-w-xs">
                   <label className="mb-1 block text-xs font-medium text-slate-700">
                     Tipo de variante
                   </label>
@@ -504,206 +581,196 @@ export default function ProductsPage() {
                       setVariantForm({
                         ...variantForm,
                         kind: e.target.value as VariantKind,
+                        size: "",
+                        color: "",
+                        tone: "",
+                        scent: "",
                       })
                     }
                   >
                     <option value="ropa">Ropa (talla / color)</option>
-                    <option value="maquillaje">
-                      Maquillaje (tono)
-                    </option>
+                    <option value="maquillaje">Maquillaje (tono)</option>
                     <option value="perfume">Perfume (aroma)</option>
                   </select>
                 </div>
-              </div>
 
-              <div className="grid gap-3 md:grid-cols-6">
-                {variantForm.kind === "ropa" && (
-                  <>
+                <div className="grid gap-3 md:grid-cols-6">
+                  {variantForm.kind === "ropa" && (
+                    <>
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-slate-700">
+                          Talla
+                        </label>
+                        <input
+                          type="text"
+                          className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                          value={variantForm.size}
+                          onChange={(e) =>
+                            setVariantForm({
+                              ...variantForm,
+                              size: e.target.value,
+                            })
+                          }
+                        />
+                      </div>
+
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-slate-700">
+                          Color
+                        </label>
+                        <input
+                          type="text"
+                          className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                          value={variantForm.color}
+                          onChange={(e) =>
+                            setVariantForm({
+                              ...variantForm,
+                              color: e.target.value,
+                            })
+                          }
+                        />
+                      </div>
+                    </>
+                  )}
+
+                  {variantForm.kind === "maquillaje" && (
                     <div>
                       <label className="mb-1 block text-xs font-medium text-slate-700">
-                        Talla
+                        Tono
                       </label>
                       <input
                         type="text"
                         className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                        value={variantForm.size}
+                        value={variantForm.tone}
                         onChange={(e) =>
                           setVariantForm({
                             ...variantForm,
-                            size: e.target.value,
+                            tone: e.target.value,
                           })
                         }
                       />
                     </div>
+                  )}
 
+                  {variantForm.kind === "perfume" && (
                     <div>
                       <label className="mb-1 block text-xs font-medium text-slate-700">
-                        Color
+                        Aroma
                       </label>
                       <input
                         type="text"
                         className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                        value={variantForm.color}
+                        value={variantForm.scent}
                         onChange={(e) =>
                           setVariantForm({
                             ...variantForm,
-                            color: e.target.value,
+                            scent: e.target.value,
                           })
                         }
                       />
                     </div>
-                  </>
-                )}
+                  )}
 
-                {variantForm.kind === "maquillaje" && (
                   <div>
                     <label className="mb-1 block text-xs font-medium text-slate-700">
-                      Tono
+                      Costo
                     </label>
                     <input
-                      type="text"
+                      type="number"
+                      step="0.01"
                       className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                      value={variantForm.tone}
+                      value={variantForm.cost}
                       onChange={(e) =>
                         setVariantForm({
                           ...variantForm,
-                          tone: e.target.value,
+                          cost: Number(e.target.value),
                         })
                       }
                     />
                   </div>
-                )}
 
-                {variantForm.kind === "perfume" && (
                   <div>
                     <label className="mb-1 block text-xs font-medium text-slate-700">
-                      Aroma
+                      Precio menudeo
                     </label>
                     <input
-                      type="text"
+                      type="number"
+                      step="0.01"
                       className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                      value={variantForm.scent}
+                      value={variantForm.priceRetail}
                       onChange={(e) =>
                         setVariantForm({
                           ...variantForm,
-                          scent: e.target.value,
+                          priceRetail: Number(e.target.value),
                         })
                       }
                     />
                   </div>
-                )}
 
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-700">
-                    Costo
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                    value={variantForm.cost}
-                    onChange={(e) =>
-                      setVariantForm({
-                        ...variantForm,
-                        cost: Number(e.target.value),
-                      })
-                    }
-                  />
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-slate-700">
+                      Precio mayoreo
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                      value={variantForm.priceWholesale}
+                      onChange={(e) =>
+                        setVariantForm({
+                          ...variantForm,
+                          priceWholesale: Number(e.target.value),
+                        })
+                      }
+                    />
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-slate-700">
+                      Stock
+                    </label>
+                    <input
+                      type="number"
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                      value={variantForm.stock}
+                      onChange={(e) =>
+                        setVariantForm({
+                          ...variantForm,
+                          stock: Number(e.target.value),
+                        })
+                      }
+                    />
+                  </div>
                 </div>
 
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-700">
-                    Precio menudeo
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                    value={variantForm.priceRetail}
-                    onChange={(e) =>
-                      setVariantForm({
-                        ...variantForm,
-                        priceRetail: Number(e.target.value),
-                      })
-                    }
-                  />
+                <div className="mt-3 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={addVariant}
+                    className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow hover:bg-emerald-700"
+                  >
+                    Añadir variante
+                  </button>
                 </div>
 
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-700">
-                    Precio mayoreo
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                    value={variantForm.priceWholesale}
-                    onChange={(e) =>
-                      setVariantForm({
-                        ...variantForm,
-                        priceWholesale: Number(e.target.value),
-                      })
-                    }
-                  />
-                </div>
+                {form.variants.length > 0 && (
+                  <div className="mt-3 overflow-x-auto">
+                    <table className="min-w-full text-left text-xs">
+                      <thead className="border-b bg-slate-50 font-semibold text-slate-600">
+                        <tr>
+                          <th className="px-2 py-1">Tipo</th>
+                          <th className="px-2 py-1">Detalle</th>
+                          <th className="px-2 py-1">Costo</th>
+                          <th className="px-2 py-1">Precio men.</th>
+                          <th className="px-2 py-1">Precio may.</th>
+                          <th className="px-2 py-1">Stock</th>
+                          <th className="px-2 py-1">Acción</th>
+                        </tr>
+                      </thead>
 
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-slate-700">
-                    Stock
-                  </label>
-                  <input
-                    type="number"
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                    value={variantForm.stock}
-                    onChange={(e) =>
-                      setVariantForm({
-                        ...variantForm,
-                        stock: Number(e.target.value),
-                      })
-                    }
-                  />
-                </div>
-              </div>
-
-              <div className="mt-3 flex justify-end">
-                <button
-                  type="button"
-                  onClick={addVariant}
-                  className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow hover:bg-emerald-700"
-                >
-                  Añadir variante
-                </button>
-              </div>
-
-              {form.variants.length > 0 && (
-                <div className="mt-3 overflow-x-auto">
-                  <table className="min-w-full text-left text-xs">
-                    <thead className="border-b bg-slate-50 font-semibold text-slate-600">
-                      <tr>
-                        <th className="px-2 py-1">Tipo</th>
-                        <th className="px-2 py-1">Detalle</th>
-                        <th className="px-2 py-1">Costo</th>
-                        <th className="px-2 py-1">Precio men.</th>
-                        <th className="px-2 py-1">Precio may.</th>
-                        <th className="px-2 py-1">Stock</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {form.variants.map((v, idx) => {
-                        let detalle = "";
-                        if (v.kind === "ropa") {
-                          detalle = `${v.size || "-"} ${v.color || ""}`.trim();
-                        } else if (v.kind === "maquillaje") {
-                          detalle = `Tono ${v.tone || "-"}`;
-                        } else {
-                          detalle = `Aroma ${v.scent || "-"}`;
-                        }
-
-                        return (
-                          <tr
-                            key={idx}
-                            className="border-b last:border-0"
-                          >
+                      <tbody>
+                        {form.variants.map((v, idx) => (
+                          <tr key={idx} className="border-b last:border-0">
                             <td className="px-2 py-1">
                               {v.kind === "ropa"
                                 ? "Ropa"
@@ -711,31 +778,36 @@ export default function ProductsPage() {
                                 ? "Maquillaje"
                                 : "Perfume"}
                             </td>
+                            <td className="px-2 py-1">{getVariantLabel(v)}</td>
                             <td className="px-2 py-1">
-                              {detalle}
+                              ${Number(v.cost || 0).toFixed(2)}
                             </td>
                             <td className="px-2 py-1">
-                              ${v.cost.toFixed(2)}
-                            </td>
-                            <td className="px-2 py-1">
-                              ${v.priceRetail.toFixed(2)}
+                              ${Number(v.priceRetail || 0).toFixed(2)}
                             </td>
                             <td className="px-2 py-1">
                               {v.priceWholesale
-                                ? `$${v.priceWholesale.toFixed(2)}`
+                                ? `$${Number(v.priceWholesale).toFixed(2)}`
                                 : "-"}
                             </td>
+                            <td className="px-2 py-1">{v.stock}</td>
                             <td className="px-2 py-1">
-                              {v.stock}
+                              <button
+                                type="button"
+                                onClick={() => removeVariant(idx)}
+                                className="rounded bg-red-600 px-2 py-1 text-[10px] font-semibold text-white hover:bg-red-700"
+                              >
+                                Quitar
+                              </button>
                             </td>
                           </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="md:col-span-4 flex justify-end gap-2">
               {editingId && (
@@ -747,6 +819,7 @@ export default function ProductsPage() {
                   Cancelar
                 </button>
               )}
+
               <button
                 type="submit"
                 disabled={saving}
@@ -762,12 +835,12 @@ export default function ProductsPage() {
           </form>
         </section>
 
-        {/* Tabla */}
         <section className="rounded-xl bg-white p-4 shadow-md md:p-6">
           <div className="mb-4 flex items-center justify-between">
             <h2 className="text-lg font-semibold text-slate-800">
               Lista de productos
             </h2>
+
             {loading && (
               <span className="text-xs text-slate-500">
                 Cargando productos...
@@ -789,6 +862,7 @@ export default function ProductsPage() {
                     <th className="px-3 py-2">SKU</th>
                     <th className="px-3 py-2">Código barras</th>
                     <th className="px-3 py-2">Categoría</th>
+                    <th className="px-3 py-2">Tipo stock</th>
                     <th className="px-3 py-2">Costo</th>
                     <th className="px-3 py-2">Precio</th>
                     <th className="px-3 py-2">Stock</th>
@@ -796,12 +870,20 @@ export default function ProductsPage() {
                     <th className="px-3 py-2">Acciones</th>
                   </tr>
                 </thead>
+
                 <tbody>
                   {products.map((p) => {
-                    const baseRow = (
+                    const stockTotal = p.useVariants
+                      ? (p.variants || []).reduce(
+                          (acc, v) => acc + Number(v.stock || 0),
+                          0
+                        )
+                      : Number(p.stock || 0);
+
+                    return (
                       <tr
                         key={p._id}
-                        className="border-b last:border-0 hover:bg-slate-50 align-top"
+                        className="border-b align-top last:border-0 hover:bg-slate-50"
                       >
                         <td className="px-3 py-2">
                           {p.imageUrl ? (
@@ -814,61 +896,46 @@ export default function ProductsPage() {
                             "-"
                           )}
                         </td>
+
                         <td className="px-3 py-2">
-                          <div className="font-medium">
-                            {p.name}
-                          </div>
-                          {p.variants &&
-                            p.variants.length > 0 && (
-                              <ul className="mt-1 space-y-0.5 text-xs text-slate-600">
-                                {p.variants.map((v, idx) => {
-                                  let label = "";
-                                  if (v.kind === "ropa") {
-                                    label =
-                                      (v.size || "-") +
-                                      " " +
-                                      (v.color || "");
-                                  } else if (
-                                    v.kind === "maquillaje"
-                                  ) {
-                                    label =
-                                      "Tono " +
-                                      (v.tone || "-");
-                                  } else {
-                                    label =
-                                      "Aroma " +
-                                      (v.scent || "-");
-                                  }
-                                  return (
-                                    <li key={idx}>
-                                      • {label} ({v.stock} pzas)
-                                    </li>
-                                  );
-                                })}
-                              </ul>
-                            )}
+                          <div className="font-medium">{p.name}</div>
+
+                          {p.useVariants && p.variants?.length > 0 && (
+                            <ul className="mt-1 space-y-0.5 text-xs text-slate-600">
+                              {p.variants.map((v, idx) => (
+                                <li key={idx}>
+                                  • {getVariantLabel(v)} ({v.stock} pzas)
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </td>
+
+                        <td className="px-3 py-2">{p.sku}</td>
+                        <td className="px-3 py-2">{p.barcode || "-"}</td>
+                        <td className="px-3 py-2">{p.category || "-"}</td>
+                        <td className="px-3 py-2">
+                          {p.useVariants ? (
+                            <span className="rounded-full bg-emerald-100 px-2 py-1 text-[10px] font-semibold text-emerald-700">
+                              Variantes
+                            </span>
+                          ) : (
+                            <span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-semibold text-slate-700">
+                              General
+                            </span>
+                          )}
                         </td>
                         <td className="px-3 py-2">
-                          {p.sku}
+                          ${Number(p.cost || 0).toFixed(2)}
                         </td>
                         <td className="px-3 py-2">
-                          {p.barcode || "-"}
+                          ${Number(p.priceRetail || 0).toFixed(2)}
                         </td>
-                        <td className="px-3 py-2">
-                          {p.category || "-"}
-                        </td>
-                        <td className="px-3 py-2">
-                          ${p.cost.toFixed(2)}
-                        </td>
-                        <td className="px-3 py-2">
-                          ${p.priceRetail.toFixed(2)}
-                        </td>
-                        <td className="px-3 py-2">
-                          {p.stock}
-                        </td>
+                        <td className="px-3 py-2">{stockTotal}</td>
                         <td className="px-3 py-2">
                           {p.isActive ? "Sí" : "No"}
                         </td>
+
                         <td className="px-3 py-2">
                           <div className="flex flex-col gap-1">
                             <button
@@ -878,6 +945,7 @@ export default function ProductsPage() {
                             >
                               Modificar
                             </button>
+
                             <button
                               type="button"
                               onClick={() => handleDelete(p)}
@@ -889,8 +957,6 @@ export default function ProductsPage() {
                         </td>
                       </tr>
                     );
-
-                    return baseRow;
                   })}
                 </tbody>
               </table>
