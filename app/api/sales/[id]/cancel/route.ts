@@ -2,18 +2,34 @@ import { NextRequest, NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { Sale } from "@/lib/models/Sale";
 import { Product } from "@/lib/models/Product";
+import { Customer } from "@/lib/models/Customer";
+import { parseSessionCookie } from "@/lib/auth";
 
-type Params = {
+type Props = {
   params: Promise<{ id: string }>;
 };
 
-export async function POST(req: NextRequest, { params }: Params) {
+function isCreditMethod(method: string) {
+  return method?.toLowerCase().trim() === "crédito";
+}
+
+export async function POST(req: NextRequest, { params }: Props) {
   try {
     await connectDB();
-    const { id } = await params;
-    const { reason } = await req.json().catch(() => ({ reason: "" }));
 
-    const sale = await Sale.findById(id);
+    const raw = req.cookies.get("sessionUser")?.value;
+    const session = parseSessionCookie(raw);
+
+    if (!session) {
+      return NextResponse.json({ message: "No autorizado" }, { status: 401 });
+    }
+
+    const { id } = await params;
+    const body = await req.json().catch(() => ({}));
+    const reason = body.reason || "Cancelación de venta";
+
+    const sale: any = await Sale.findById(id);
+
     if (!sale) {
       return NextResponse.json(
         { message: "Venta no encontrada" },
@@ -28,60 +44,55 @@ export async function POST(req: NextRequest, { params }: Params) {
       );
     }
 
-    // 🔹 Regresar stock
-    if (Array.isArray(sale.items)) {
-      for (const item of sale.items as any[]) {
-        try {
-          const product = await Product.findById(item.product);
-          if (!product) continue;
+    for (const item of sale.items || []) {
+      if (!item.productId) continue;
 
-          product.stock =
-            (product.stock || 0) + (item.quantity || 0);
+      const qty = Math.abs(Number(item.quantity || 0));
 
-          if (item.variantKind && product.variants && product.variants.length > 0) {
-            const idx = product.variants.findIndex((v: any) => {
-              return (
-                v.kind === item.variantKind &&
-                (v.size || "") === (item.size || "") &&
-                (v.color || "") === (item.color || "") &&
-                (v.tone || "") === (item.tone || "") &&
-                (v.scent || "") === (item.scent || "")
-              );
-            });
-
-            if (idx !== -1) {
-              product.variants[idx].stock =
-                (product.variants[idx].stock || 0) +
-                (item.quantity || 0);
-            }
+      if (item.variantId) {
+        await Product.updateOne(
+          {
+            _id: item.productId,
+            "variants._id": item.variantId,
+          },
+          {
+            $inc: {
+              "variants.$.stock": qty,
+            },
           }
-
-          await product.save();
-        } catch (err) {
-          console.error(
-            "Error regresando stock al cancelar venta:",
-            err
-          );
-        }
+        ).exec();
+      } else {
+        await Product.findByIdAndUpdate(item.productId, {
+          $inc: { stock: qty },
+        }).exec();
       }
     }
 
-        sale.status = "cancelled" as any;
+    const creditAmount = (sale.payments || [])
+      .filter((p: any) => isCreditMethod(String(p.method || "")))
+      .reduce((acc: number, p: any) => acc + Number(p.amount || 0), 0);
 
-    // Evitamos el error de TypeScript usando "as any"
-    (sale as any).cancelledAt = new Date();
-    if (reason) {
-      (sale as any).cancellationReason = reason;
+    if (sale.customerId && creditAmount > 0) {
+      await Customer.findByIdAndUpdate(sale.customerId, {
+        $inc: { currentBalance: -Math.abs(creditAmount) },
+      }).exec();
     }
+
+    sale.status = "cancelled";
+    sale.cancelReason = reason;
+    sale.cancellationReason = reason;
+    sale.cancelledAt = new Date();
+    sale.cancelledBy = session.username || "Usuario";
 
     await sale.save();
 
-    return NextResponse.json(
-      { message: "Venta cancelada correctamente", sale },
-      { status: 200 }
-    );
+    return NextResponse.json({
+      message: "Venta cancelada correctamente",
+      sale,
+    });
   } catch (error: any) {
     console.error("Error en POST /api/sales/[id]/cancel:", error);
+
     return NextResponse.json(
       {
         message: "Error al cancelar venta",

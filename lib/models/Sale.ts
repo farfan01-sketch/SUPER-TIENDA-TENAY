@@ -6,6 +6,7 @@ export interface ISaleItem {
   variantText?: string;
   variantId?: mongoose.Types.ObjectId;
   quantity: number;
+  returnedQuantity?: number;
   price: number;
   cost?: number;
   subtotal: number;
@@ -33,6 +34,9 @@ export interface ISale extends Document {
   shiftId?: mongoose.Types.ObjectId;
   status: SaleStatus;
   cancelReason?: string;
+  cancellationReason?: string;
+  cancelledAt?: Date;
+  cancelledBy?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -44,6 +48,7 @@ const SaleItemSchema = new Schema<ISaleItem>(
     variantText: { type: String },
     variantId: { type: Schema.Types.ObjectId },
     quantity: { type: Number, required: true },
+    returnedQuantity: { type: Number, default: 0 },
     price: { type: Number, required: true },
     cost: { type: Number },
     subtotal: { type: Number, required: true },
@@ -62,13 +67,16 @@ const SalePaymentSchema = new Schema<ISalePayment>(
 const SaleSchema = new Schema<ISale>(
   {
     folio: { type: String, required: true, unique: true },
+
     items: {
       type: [SaleItemSchema],
       default: [],
     },
+
     subtotal: { type: Number, required: true },
     discount: { type: Number, default: 0 },
     total: { type: Number, required: true },
+
     payments: { type: [SalePaymentSchema], default: [] },
     totalPaid: { type: Number, default: 0 },
     change: { type: Number, default: 0 },
@@ -77,6 +85,7 @@ const SaleSchema = new Schema<ISale>(
     customerName: { type: String },
 
     cashier: { type: String },
+
     shiftId: {
       type: Schema.Types.ObjectId,
       ref: "Shift",
@@ -87,8 +96,13 @@ const SaleSchema = new Schema<ISale>(
       type: String,
       enum: ["completed", "cancelled"],
       default: "completed",
+      index: true,
     },
+
     cancelReason: { type: String },
+    cancellationReason: { type: String },
+    cancelledAt: { type: Date },
+    cancelledBy: { type: String },
   },
   { timestamps: true }
 );

@@ -7,7 +7,8 @@ export interface ICustomer extends Document {
   address?: string;
   notes?: string;
   creditLimit: number;
-  currentBalance: number; // saldo pendiente actual
+  creditDays: number;
+  currentBalance: number;
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -20,7 +21,10 @@ const CustomerSchema = new Schema<ICustomer>(
     email: { type: String },
     address: { type: String },
     notes: { type: String },
+
     creditLimit: { type: Number, default: 0 },
+    creditDays: { type: Number, default: 0 },
+
     currentBalance: { type: Number, default: 0 },
     isActive: { type: Boolean, default: true },
   },

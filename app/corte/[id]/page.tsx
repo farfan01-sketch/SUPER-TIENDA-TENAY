@@ -48,14 +48,26 @@ export default async function CashCutTicketPage({ params }: Props) {
 
   const totalSales = Number(cut.totalSales || 0);
   const totalDiscounts = Number(cut.totalDiscounts || 0);
+
+  const returnsCount = Number(cut.returnsCount || 0);
+  const returnsTotal = Number(cut.returnsTotal || 0);
+  const returnsCost = Number(cut.returnsCost || 0);
+
+  const cancelledSalesCount = Number(cut.cancelledSalesCount || 0);
+  const cancelledSalesTotal = Number(cut.cancelledSalesTotal || 0);
+
   const netSales =
-    cut.netSales != null ? Number(cut.netSales || 0) : totalSales - totalDiscounts;
+    cut.netSales != null
+      ? Number(cut.netSales || 0)
+      : totalSales - totalDiscounts - returnsTotal;
 
   const totalCost = Number(cut.totalCost || 0);
   const profit = Number(cut.profit || 0);
 
   const saleCount =
-    cut.salesCount != null ? Number(cut.salesCount || 0) : Number(cut.saleCount || 0);
+    cut.salesCount != null
+      ? Number(cut.salesCount || 0)
+      : Number(cut.saleCount || 0);
 
   const openingAmount = Number(cut.openingAmount || 0);
   const closingAmount = Number(cut.closingAmount || 0);
@@ -177,6 +189,11 @@ export default async function CashCutTicketPage({ params }: Props) {
             <span>-{money(totalDiscounts)}</span>
           </div>
 
+          <div className="flex justify-between text-red-700">
+            <span>Devoluciones:</span>
+            <span>-{money(returnsTotal)}</span>
+          </div>
+
           <div className="flex justify-between font-semibold">
             <span>Ventas netas:</span>
             <span>{money(netSales)}</span>
@@ -187,6 +204,13 @@ export default async function CashCutTicketPage({ params }: Props) {
             <span>{money(totalCost)}</span>
           </div>
 
+          {returnsCost > 0 && (
+            <div className="flex justify-between text-[10px] text-slate-500">
+              <span>Costo devuelto descontado:</span>
+              <span>{money(returnsCost)}</span>
+            </div>
+          )}
+
           <div className="flex justify-between font-semibold text-emerald-700">
             <span>Utilidad estimada:</span>
             <span>{money(profit)}</span>
@@ -195,6 +219,18 @@ export default async function CashCutTicketPage({ params }: Props) {
           <div className="flex justify-between">
             <span>Ventas incluidas:</span>
             <span>{saleCount}</span>
+          </div>
+
+          <div className="flex justify-between">
+            <span>Devoluciones realizadas:</span>
+            <span>{returnsCount}</span>
+          </div>
+
+          <div className="flex justify-between">
+            <span>Cancelaciones:</span>
+            <span>
+              {cancelledSalesCount} · {money(cancelledSalesTotal)}
+            </span>
           </div>
         </div>
 
@@ -213,6 +249,13 @@ export default async function CashCutTicketPage({ params }: Props) {
                 </div>
               ))}
             </div>
+
+            {returnsTotal > 0 && (
+              <div className="mt-1 flex justify-between text-[11px] font-semibold text-red-700">
+                <span>Salida por devolución:</span>
+                <span>-{money(returnsTotal)}</span>
+              </div>
+            )}
           </>
         )}
 
