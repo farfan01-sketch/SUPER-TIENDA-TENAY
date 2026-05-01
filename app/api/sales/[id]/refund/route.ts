@@ -4,6 +4,7 @@ import { Sale } from "@/lib/models/Sale";
 import { Product } from "@/lib/models/Product";
 import { Customer } from "@/lib/models/Customer";
 import { SaleReturn } from "@/lib/models/SaleReturn";
+import { InventoryMovement } from "@/lib/models/InventoryMovement";
 import { parseSessionCookie } from "@/lib/auth";
 
 type Props = {
@@ -63,6 +64,7 @@ export async function POST(req: NextRequest, { params }: Props) {
 
     let totalReturned = 0;
     const returnItems: any[] = [];
+    const kardexMovements: any[] = [];
 
     for (const rItem of items) {
       const qty = Math.abs(Number(rItem.quantity || 0));
@@ -100,22 +102,61 @@ export async function POST(req: NextRequest, { params }: Props) {
       const subtotal = qty * Number(original.price || 0);
       totalReturned += subtotal;
 
+      const product: any = await Product.findById(original.productId);
+
+      if (!product) continue;
+
       if (original.variantId) {
-        await Product.updateOne(
-          {
-            _id: original.productId,
-            "variants._id": original.variantId,
-          },
-          {
-            $inc: {
-              "variants.$.stock": qty,
-            },
-          }
-        ).exec();
+        const variant: any = (product.variants || []).find(
+          (v: any) => v._id?.toString() === String(original.variantId)
+        );
+
+        if (!variant) continue;
+
+        const previousStock = Number(variant.stock || 0);
+        const newStock = previousStock + qty;
+
+        variant.stock = newStock;
+        await product.save();
+
+        kardexMovements.push({
+          product: product._id,
+          variantId: String(original.variantId),
+          type: "devolucion",
+          quantity: qty,
+          previousStock,
+          newStock,
+          cost: Number(original.cost ?? product.cost ?? 0),
+          priceRetail: Number(original.price ?? product.priceRetail ?? 0),
+          priceWholesale: product.priceWholesale,
+          reason: reason || `Devolución de venta ${sale.folio || ""}`,
+          referenceId: sale._id.toString(),
+          referenceType: "SaleReturn",
+          createdById: session._id,
+          createdByName: session.username,
+        });
       } else {
-        await Product.findByIdAndUpdate(original.productId, {
-          $inc: { stock: qty },
-        }).exec();
+        const previousStock = Number(product.stock || 0);
+        const newStock = previousStock + qty;
+
+        product.stock = newStock;
+        await product.save();
+
+        kardexMovements.push({
+          product: product._id,
+          type: "devolucion",
+          quantity: qty,
+          previousStock,
+          newStock,
+          cost: Number(original.cost ?? product.cost ?? 0),
+          priceRetail: Number(original.price ?? product.priceRetail ?? 0),
+          priceWholesale: product.priceWholesale,
+          reason: reason || `Devolución de venta ${sale.folio || ""}`,
+          referenceId: sale._id.toString(),
+          referenceType: "SaleReturn",
+          createdById: session._id,
+          createdByName: session.username,
+        });
       }
 
       sale.items[originalIndex].returnedQuantity = alreadyReturned + qty;
@@ -167,6 +208,15 @@ export async function POST(req: NextRequest, { params }: Props) {
       type: "partial",
       createdBy: session.username || "Usuario",
     });
+
+    if (kardexMovements.length > 0) {
+      await InventoryMovement.insertMany(
+        kardexMovements.map((m) => ({
+          ...m,
+          referenceId: saleReturn._id.toString(),
+        }))
+      );
+    }
 
     return NextResponse.json({
       message: "Devolución registrada correctamente",

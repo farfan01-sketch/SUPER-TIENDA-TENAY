@@ -1,9 +1,16 @@
 import mongoose, { Schema, Model, Document, Types } from "mongoose";
 
-export type InventoryMovementType = "entrada" | "ajuste";
+export type InventoryMovementType =
+  | "entrada"
+  | "salida"
+  | "venta"
+  | "ajuste"
+  | "devolucion"
+  | "cancelacion";
 
 export interface IInventoryMovement extends Document {
   product: Types.ObjectId;
+  variantId?: string;
   type: InventoryMovementType;
   quantity: number;
   previousStock: number;
@@ -12,6 +19,8 @@ export interface IInventoryMovement extends Document {
   priceRetail: number;
   priceWholesale?: number;
   reason?: string;
+  referenceId?: string;
+  referenceType?: string;
   createdById?: string;
   createdByName?: string;
   createdAt: Date;
@@ -25,18 +34,26 @@ const InventoryMovementSchema = new Schema<IInventoryMovement>(
       ref: "Product",
       required: true,
     },
+    variantId: { type: String },
+
     type: {
       type: String,
-      enum: ["entrada", "ajuste"],
+      enum: ["entrada", "salida", "venta", "ajuste", "devolucion", "cancelacion"],
       required: true,
     },
+
     quantity: { type: Number, required: true },
     previousStock: { type: Number, required: true },
     newStock: { type: Number, required: true },
-    cost: { type: Number, required: true },
-    priceRetail: { type: Number, required: true },
+
+    cost: { type: Number, required: true, default: 0 },
+    priceRetail: { type: Number, required: true, default: 0 },
     priceWholesale: { type: Number },
+
     reason: { type: String },
+    referenceId: { type: String },
+    referenceType: { type: String },
+
     createdById: { type: String },
     createdByName: { type: String },
   },

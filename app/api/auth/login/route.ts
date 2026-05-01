@@ -2,52 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { connectDB } from "@/lib/db";
 import { User } from "@/lib/models/User";
-
-type SessionUser = {
-  _id: string;
-  username: string;
-  role: string;
-  permissions: {
-    canSell: boolean;
-    canManageProducts: boolean;
-    canSeeReports: boolean;
-    canDoCashCuts: boolean;
-    canCancelSales: boolean;
-    canManageUsers: boolean;
-    canAccessConfig: boolean;
-  };
-};
-
-function buildSessionCookieValue(user: SessionUser): string {
-  return encodeURIComponent(JSON.stringify(user));
-}
+import {
+  buildSessionCookieValue,
+  SessionUser,
+} from "@/lib/auth";
 
 export async function POST(request: NextRequest) {
   try {
     await connectDB();
-
-    // Asegura que exista un admin funcional para pruebas
-    const adminPasswordHash = await bcrypt.hash("1234", 10);
-
-    await User.findOneAndUpdate(
-      { username: "admin" },
-      {
-        username: "admin",
-        passwordHash: adminPasswordHash,
-        role: "admin",
-        isActive: true,
-        permissions: {
-          canSell: true,
-          canManageProducts: true,
-          canSeeReports: true,
-          canDoCashCuts: true,
-          canCancelSales: true,
-          canManageUsers: true,
-          canAccessConfig: true,
-        },
-      },
-      { upsert: true, new: true }
-    );
 
     const { username, password } = await request.json();
 
@@ -60,17 +22,10 @@ export async function POST(request: NextRequest) {
 
     const user = await User.findOne({ username }).lean();
 
-    if (!user) {
+    if (!user || !user.isActive) {
       return NextResponse.json(
         { message: "Usuario o contraseña incorrectos" },
         { status: 401 }
-      );
-    }
-
-    if (!user.isActive) {
-      return NextResponse.json(
-        { message: "Este usuario está inactivo" },
-        { status: 403 }
       );
     }
 
@@ -83,17 +38,25 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const session: SessionUser = {
+    const sessionUser: SessionUser = {
       _id: user._id.toString(),
       username: user.username,
       role: user.role,
       permissions: user.permissions,
     };
 
-    const cookieValue = buildSessionCookieValue(session);
+    const cookieValue = buildSessionCookieValue(sessionUser);
 
     const response = NextResponse.json(
-      { message: "Login correcto" },
+      {
+        message: "Login correcto",
+        user: {
+          _id: sessionUser._id,
+          username: sessionUser.username,
+          role: sessionUser.role,
+          permissions: sessionUser.permissions,
+        },
+      },
       { status: 200 }
     );
 
@@ -107,6 +70,7 @@ export async function POST(request: NextRequest) {
     return response;
   } catch (error: any) {
     console.error("ERROR /api/auth/login:", error);
+
     return NextResponse.json(
       {
         message: "Error interno en el servidor",

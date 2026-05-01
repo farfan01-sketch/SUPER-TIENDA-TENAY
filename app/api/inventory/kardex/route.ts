@@ -1,20 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { Product } from "@/lib/models/Product";
-import { Sale } from "@/lib/models/Sale";
-import { InventoryAdjustment } from "@/lib/models/InventoryAdjustment";
+import { InventoryMovement } from "@/lib/models/InventoryMovement";
 import { parseSessionCookie } from "@/lib/auth";
 import mongoose from "mongoose";
-
-type KardexMovement = {
-  date: string;
-  type: string;
-  reference?: string;
-  quantityIn: number;
-  quantityOut: number;
-  balanceAfter: number;
-  note?: string;
-};
 
 export async function GET(req: NextRequest) {
   try {
@@ -28,10 +17,7 @@ export async function GET(req: NextRequest) {
       (!session.permissions?.canSeeReports &&
         !session.permissions?.canManageProducts)
     ) {
-      return NextResponse.json(
-        { message: "No autorizado" },
-        { status: 403 }
-      );
+      return NextResponse.json({ message: "No autorizado" }, { status: 403 });
     }
 
     const { searchParams } = new URL(req.url);
@@ -40,10 +26,7 @@ export async function GET(req: NextRequest) {
 
     if (!productId && !skuOrBarcode) {
       return NextResponse.json(
-        {
-          message:
-            "Debes enviar productId o skuOrBarcode como parámetro",
-        },
+        { message: "Debes enviar productId o skuOrBarcode como parámetro" },
         { status: 400 }
       );
     }
@@ -54,10 +37,7 @@ export async function GET(req: NextRequest) {
       product = await Product.findById(productId).lean();
     } else if (skuOrBarcode) {
       product = await Product.findOne({
-        $or: [
-          { sku: skuOrBarcode },
-          { barcode: skuOrBarcode },
-        ],
+        $or: [{ sku: skuOrBarcode }, { barcode: skuOrBarcode }],
       }).lean();
     }
 
@@ -68,95 +48,43 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const prodId = product._id;
-
-    // MOVIMIENTOS POR VENTAS
-    const sales = await Sale.find({
-      "items.productId": prodId,
+    const movements = await InventoryMovement.find({
+      product: product._id,
     })
       .sort({ createdAt: 1 })
       .lean();
 
-    const saleMovements: KardexMovement[] = [];
+    const formattedMovements = movements.map((m: any) => {
+      const qty = Math.abs(Number(m.quantity || 0));
 
-    for (const sale of sales) {
-      const saleDate: Date = sale.createdAt || new Date();
-      const folio: string = sale.folio || "";
-      const items = sale.items || [];
+      const isIn =
+        m.type === "entrada" ||
+        m.type === "devolucion" ||
+        m.type === "cancelacion" ||
+        (m.type === "ajuste" && Number(m.quantity || 0) > 0);
 
-      for (const item of items) {
-        if (
-          item.productId?.toString() === prodId.toString()
-        ) {
-          const qty = Number(item.quantity || 0);
-          if (qty <= 0) continue;
+      const isOut =
+        m.type === "venta" ||
+        m.type === "salida" ||
+        (m.type === "ajuste" && Number(m.quantity || 0) < 0);
 
-          saleMovements.push({
-            date: saleDate.toISOString(),
-            type: "VENTA",
-            reference: folio,
-            quantityIn: 0,
-            quantityOut: qty,
-            balanceAfter: 0, // se calcula después
-            note: item.variantText || "",
-          });
-        }
-      }
-    }
+      return {
+        date: (m.createdAt || new Date()).toISOString(),
+        type: String(m.type || "").toUpperCase(),
+        reference: m.referenceId || "",
+        quantityIn: isIn ? qty : 0,
+        quantityOut: isOut ? qty : 0,
+        balanceAfter: Number(m.newStock || 0),
+        note: m.reason || "",
+        createdByName: m.createdByName || "",
+      };
+    });
 
-    // MOVIMIENTOS POR AJUSTES
-    const adjustments = await InventoryAdjustment.find({
-      productId: prodId,
-    })
-      .sort({ createdAt: 1 })
-      .lean();
-
-    const adjMovements: KardexMovement[] = adjustments.map(
-      (adj: any) => {
-        const isIn = adj.type === "in";
-        const qty = Number(adj.quantity || 0);
-
-        return {
-          date: (adj.createdAt || new Date()).toISOString(),
-          type: isIn ? "AJUSTE +" : "AJUSTE -",
-          reference: adj._id?.toString(),
-          quantityIn: isIn ? qty : 0,
-          quantityOut: isIn ? 0 : qty,
-          balanceAfter: 0,
-          note: adj.reason || adj.username || "",
-        };
-      }
-    );
-
-    // Unimos y ordenamos por fecha
-    const allMovements = [...saleMovements, ...adjMovements].sort(
-      (a, b) =>
-        new Date(a.date).getTime() -
-        new Date(b.date).getTime()
-    );
-
-    // Calculamos saldo inicial en base al stock actual
     const currentStock = Number(product.stock || 0);
-    const netDelta = allMovements.reduce(
-      (acc, m) =>
-        acc + Number(m.quantityIn || 0) - Number(m.quantityOut || 0),
-      0
-    );
-    const initialBalance = currentStock - netDelta;
-
-    // Recorremos para asignar balanceAfter
-    let running = initialBalance;
-    const movementsWithBalance: KardexMovement[] =
-      allMovements.map((m) => {
-        running =
-          running +
-          Number(m.quantityIn || 0) -
-          Number(m.quantityOut || 0);
-        return {
-          ...m,
-          balanceAfter: running,
-        };
-      });
+    const initialBalance =
+      formattedMovements.length > 0
+        ? Number(movements[0].previousStock || 0)
+        : currentStock;
 
     return NextResponse.json({
       product: {
@@ -171,10 +99,11 @@ export async function GET(req: NextRequest) {
       },
       initialBalance,
       currentStock,
-      movements: movementsWithBalance,
+      movements: formattedMovements,
     });
   } catch (error: any) {
     console.error("Error en GET /api/inventory/kardex:", error);
+
     return NextResponse.json(
       {
         message: "Error al obtener kardex",

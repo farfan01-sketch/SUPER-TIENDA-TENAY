@@ -3,6 +3,7 @@ import { connectDB } from "@/lib/db";
 import { Sale } from "@/lib/models/Sale";
 import { Product } from "@/lib/models/Product";
 import { Customer } from "@/lib/models/Customer";
+import { InventoryMovement } from "@/lib/models/InventoryMovement";
 import { parseSessionCookie } from "@/lib/auth";
 
 function buildSaleFolio(lastFolio?: string | null) {
@@ -203,23 +204,62 @@ export async function POST(req: NextRequest) {
       if (!item.productId) continue;
 
       const qty = Math.abs(Number(item.quantity || 0));
+      if (qty <= 0) continue;
+
+      const product = await Product.findById(item.productId);
+      if (!product) continue;
 
       if (item.variantId) {
-        await Product.updateOne(
-          {
-            _id: item.productId,
-            "variants._id": item.variantId,
-          },
-          {
-            $inc: {
-              "variants.$.stock": -qty,
-            },
-          }
-        ).exec();
+        const variant: any = (product.variants || []).find(
+          (v: any) => v._id?.toString() === item.variantId
+        );
+
+        if (!variant) continue;
+
+        const previousStock = Number(variant.stock || 0);
+        const newStock = previousStock - qty;
+
+        variant.stock = newStock;
+        await product.save();
+
+        await InventoryMovement.create({
+          product: product._id,
+          variantId: item.variantId,
+          type: "venta",
+          quantity: -qty,
+          previousStock,
+          newStock,
+          cost: Number(item.cost ?? product.cost ?? 0),
+          priceRetail: Number(item.price ?? product.priceRetail ?? 0),
+          priceWholesale: product.priceWholesale,
+          reason: `Venta ${folio}${item.variantText ? ` - ${item.variantText}` : ""}`,
+          referenceId: sale._id.toString(),
+          referenceType: "Sale",
+          createdById: session?._id,
+          createdByName: cashierName,
+        });
       } else {
-        await Product.findByIdAndUpdate(item.productId, {
-          $inc: { stock: -qty },
-        }).exec();
+        const previousStock = Number(product.stock || 0);
+        const newStock = previousStock - qty;
+
+        product.stock = newStock;
+        await product.save();
+
+        await InventoryMovement.create({
+          product: product._id,
+          type: "venta",
+          quantity: -qty,
+          previousStock,
+          newStock,
+          cost: Number(item.cost ?? product.cost ?? 0),
+          priceRetail: Number(item.price ?? product.priceRetail ?? 0),
+          priceWholesale: product.priceWholesale,
+          reason: `Venta ${folio}`,
+          referenceId: sale._id.toString(),
+          referenceType: "Sale",
+          createdById: session?._id,
+          createdByName: cashierName,
+        });
       }
     }
 
