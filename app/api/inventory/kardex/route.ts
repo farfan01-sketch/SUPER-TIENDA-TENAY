@@ -23,6 +23,7 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const productId = searchParams.get("productId");
     const skuOrBarcode = searchParams.get("skuOrBarcode");
+    const variantId = searchParams.get("variantId");
 
     if (!productId && !skuOrBarcode) {
       return NextResponse.json(
@@ -48,9 +49,23 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const movements = await InventoryMovement.find({
+    let selectedVariant: any = null;
+
+    if (variantId && Array.isArray(product.variants)) {
+      selectedVariant = product.variants.find(
+        (v: any) => v._id?.toString() === variantId
+      );
+    }
+
+    const query: any = {
       product: product._id,
-    })
+    };
+
+    if (variantId) {
+      query.variantId = variantId;
+    }
+
+    const movements = await InventoryMovement.find(query)
       .sort({ createdAt: 1 })
       .lean();
 
@@ -72,6 +87,7 @@ export async function GET(req: NextRequest) {
         date: (m.createdAt || new Date()).toISOString(),
         type: String(m.type || "").toUpperCase(),
         reference: m.referenceId || "",
+        variantId: m.variantId || "",
         quantityIn: isIn ? qty : 0,
         quantityOut: isOut ? qty : 0,
         balanceAfter: Number(m.newStock || 0),
@@ -80,7 +96,38 @@ export async function GET(req: NextRequest) {
       };
     });
 
-    const currentStock = Number(product.stock || 0);
+    const productStock = Number(product.stock || 0);
+
+    const variants = Array.isArray(product.variants)
+      ? product.variants.map((v: any) => ({
+          _id: v._id?.toString(),
+          name: v.name || "",
+          label:
+            v.name ||
+            v.variantText ||
+            [v.size, v.color, v.aroma, v.flavor]
+              .filter(Boolean)
+              .join(" / ") ||
+            "Variante",
+          sku: v.sku || "",
+          barcode: v.barcode || "",
+          stock: Number(v.stock || 0),
+          cost: Number(v.cost ?? product.cost ?? 0),
+          priceRetail: Number(v.priceRetail ?? product.priceRetail ?? 0),
+          priceWholesale: Number(
+            v.priceWholesale ?? product.priceWholesale ?? 0
+          ),
+        }))
+      : [];
+
+    const hasVariants = variants.length > 0;
+
+    const currentStock = variantId
+      ? Number(selectedVariant?.stock || 0)
+      : hasVariants
+      ? variants.reduce((acc: number, v: any) => acc + Number(v.stock || 0), 0)
+      : productStock;
+
     const initialBalance =
       formattedMovements.length > 0
         ? Number(movements[0].previousStock || 0)
@@ -96,6 +143,27 @@ export async function GET(req: NextRequest) {
         cost: Number(product.cost || 0),
         priceRetail: Number(product.priceRetail || 0),
         stock: currentStock,
+        hasVariants,
+        variants,
+        selectedVariant: selectedVariant
+          ? {
+              _id: selectedVariant._id?.toString(),
+              name: selectedVariant.name || "",
+              label:
+                selectedVariant.name ||
+                selectedVariant.variantText ||
+                [
+                  selectedVariant.size,
+                  selectedVariant.color,
+                  selectedVariant.aroma,
+                  selectedVariant.flavor,
+                ]
+                  .filter(Boolean)
+                  .join(" / ") ||
+                "Variante",
+              stock: Number(selectedVariant.stock || 0),
+            }
+          : null,
       },
       initialBalance,
       currentStock,
