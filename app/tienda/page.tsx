@@ -40,7 +40,6 @@ export default function OnlineStorePage() {
   const [customerPhone, setCustomerPhone] = useState("");
   const [customerAddress, setCustomerAddress] = useState("");
   const [customerEmail, setCustomerEmail] = useState("");
-  const [sendingOrder, setSendingOrder] = useState(false);
 
   function clearMessages() {
     setError(null);
@@ -55,9 +54,7 @@ export default function OnlineStorePage() {
 
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        throw new Error(
-          data.message || "No se pudieron cargar los productos"
-        );
+        throw new Error(data.message || "No se pudieron cargar los productos");
       }
 
       const data: ApiProduct[] = await res.json();
@@ -183,11 +180,7 @@ export default function OnlineStorePage() {
   }
 
   const cartTotal = useMemo(
-    () =>
-      cart.reduce(
-        (acc, item) => acc + item.price * item.quantity,
-        0
-      ),
+    () => cart.reduce((acc, item) => acc + item.price * item.quantity, 0),
     [cart]
   );
 
@@ -196,128 +189,47 @@ export default function OnlineStorePage() {
   }
 
   function buildOrderMessage() {
-    let text =
-      "*Nuevo pedido desde la tienda en línea – Super Tienda Tenay*\n\n";
+    let text = "*Nuevo pedido desde la tienda en línea – Cosmetic Tenay* 💄\n\n";
 
-    if (customerName || customerPhone || customerAddress || customerEmail) {
-      text += "*Datos del cliente:*\n";
-      if (customerName) text += `Nombre: ${customerName}\n`;
-      if (customerPhone) text += `WhatsApp: ${customerPhone}\n`;
-      if (customerAddress) text += `Dirección: ${customerAddress}\n`;
-      if (customerEmail) text += `Correo: ${customerEmail}\n`;
-      text += "\n";
-    }
+    text += "*Datos del cliente:*\n";
+    text += `Nombre: ${customerName || "Pendiente"}\n`;
+    text += `WhatsApp: ${customerPhone || "Pendiente"}\n`;
+    text += `Dirección: ${customerAddress || "Pendiente"}\n`;
+    if (customerEmail) text += `Correo: ${customerEmail}\n`;
 
-    text += "*Productos:*\n";
+    text += "\n*Productos:*\n";
 
     cart.forEach((item, index) => {
       const subtotal = item.price * item.quantity;
-      text += `${index + 1}. ${item.name} x${
-        item.quantity
-      } – ${formatMoney(item.price)} c/u = ${formatMoney(
-        subtotal
-      )}\n`;
+      text += `${index + 1}. ${item.name} x${item.quantity}\n`;
+      text += `   ${formatMoney(item.price)} c/u = ${formatMoney(subtotal)}\n`;
     });
 
     text += `\n*Total aproximado:* ${formatMoney(cartTotal)}\n\n`;
-    text +=
-      "Por favor confirma existencias, forma de pago y tiempo de entrega. 🙌";
+    text += "Por favor confírmame disponibilidad, forma de pago y tiempo de entrega 🙌";
 
     return text;
   }
 
-  async function sendOrder() {
+  function sendOrder() {
     if (cart.length === 0) {
       alert("Tu carrito está vacío.");
       return;
     }
 
     const storePhone = cleanPhone(STORE_WHATSAPP);
-    const custPhoneClean = cleanPhone(customerPhone);
 
     if (!storePhone) {
-      alert(
-        "No se ha configurado correctamente el número de WhatsApp de la tienda."
-      );
+      alert("Número de WhatsApp no configurado.");
       return;
     }
 
     const text = buildOrderMessage();
+    const whatsappUrl = `https://wa.me/${storePhone}?text=${encodeURIComponent(
+      text
+    )}`;
 
-    try {
-      setSendingOrder(true);
-
-      const orderRes = await fetch("/api/online-orders", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          cart: cart.map((item) => ({
-            productId: item.productId,
-            name: item.name,
-            price: item.price,
-            quantity: item.quantity,
-          })),
-          total: cartTotal,
-          customer: {
-            name: customerName,
-            phone: customerPhone,
-            address: customerAddress,
-            email: customerEmail,
-          },
-          source: "tienda-online",
-          createdAt: new Date().toISOString(),
-        }),
-      });
-
-      if (!orderRes.ok) {
-        const orderJson = await orderRes.json().catch(() => ({}));
-        throw new Error(orderJson.message || "No se pudo guardar el pedido");
-      }
-
-      const waRes = await fetch("/api/whatsapp/send-order", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ to: storePhone, message: text }),
-      });
-
-      const waJson = await waRes.json().catch(() => ({}));
-
-      if (!waRes.ok) {
-        console.error("WhatsApp error:", waJson);
-        alert("Error WhatsApp: " + (waJson?.error || "desconocido"));
-        alert(JSON.stringify(waJson, null, 2));
-        return;
-      }
-
-      if (custPhoneClean) {
-        const waRes2 = await fetch("/api/whatsapp/send-order", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ to: custPhoneClean, message: text }),
-        });
-
-        const waJson2 = await waRes2.json().catch(() => ({}));
-
-        if (!waRes2.ok) {
-          console.error("WhatsApp client error:", waJson2);
-        }
-      }
-
-      clearCart();
-      setCustomerName("");
-      setCustomerPhone("");
-      setCustomerAddress("");
-      setCustomerEmail("");
-
-      alert("Pedido enviado por WhatsApp correctamente 😎");
-    } catch (e) {
-      console.error("Error al enviar pedido:", e);
-      alert(
-        "Ocurrió un error al enviar el pedido por WhatsApp. Inténtalo de nuevo."
-      );
-    } finally {
-      setSendingOrder(false);
-    }
+    window.open(whatsappUrl, "_blank");
   }
 
   return (
@@ -327,13 +239,13 @@ export default function OnlineStorePage() {
           <div className="h-14 w-14 overflow-hidden rounded-full bg-white border border-pink-200 flex items-center justify-center">
             <img
               src="/uploads/logo.jpg"
-              alt="Logo Super Tienda Tenay"
+              alt="Logo Cosmetic Tenay"
               className="h-full w-full object-contain"
             />
           </div>
           <div className="text-center">
             <p className="text-lg font-bold text-slate-900">
-              Super Tienda Tenay
+              Cosmetic Tenay
             </p>
             <p className="text-sm text-slate-500">Tienda en línea</p>
           </div>
@@ -345,18 +257,16 @@ export default function OnlineStorePage() {
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div>
               <h1 className="text-2xl font-bold md:text-3xl">
-                Compra en línea en Super Tienda Tenay
+                Compra en línea en Cosmetic Tenay
               </h1>
               <p className="mt-2 text-sm text-slate-700 max-w-xl">
-                Productos con existencia real conectada a nuestro punto de
-                venta. Haz tu pedido y te confirmamos por WhatsApp.
+                Elige tus productos favoritos y envíanos tu pedido directamente por WhatsApp.
               </p>
             </div>
             <div className="rounded-xl bg-pink-100/60 p-4 text-slate-900 shadow">
               <p className="font-semibold">¿Cómo funciona?</p>
               <p className="text-slate-700">
-                1) Elige tus productos · 2) Armamos tu pedido y lo enviamos por
-                WhatsApp · 3) Pagas en tienda o con el método que acordemos.
+                1) Elige tus productos · 2) Envía tu pedido por WhatsApp · 3) Confirmamos disponibilidad y forma de pago.
               </p>
             </div>
           </div>
@@ -370,7 +280,7 @@ export default function OnlineStorePage() {
               </label>
               <input
                 type="text"
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-pink-500 focus:ring-1 focus:ring-pink-500"
                 placeholder="Busca por nombre, categoría, SKU o código de barras..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
@@ -450,7 +360,7 @@ export default function OnlineStorePage() {
                     return (
                       <article
                         key={p._id}
-                        className="flex flex-col rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden hover:border-slate-400 transition-colors"
+                        className="flex flex-col rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden hover:border-pink-300 transition-colors"
                       >
                         <div className="relative h-32 w-full bg-slate-100 md:h-36">
                           {p.imageUrl ? (
@@ -486,20 +396,17 @@ export default function OnlineStorePage() {
                           </div>
 
                           <div className="text-[11px] text-slate-500">
-                            Stock:{" "}
-                            <span className="font-semibold">{p.stock}</span>
+                            Stock: <span className="font-semibold">{p.stock}</span>
                           </div>
 
                           <div className="mt-2">
                             <button
                               type="button"
                               disabled={agotado}
-                              className="w-full rounded-lg bg-slate-900 px-3 py-1.5 text-[11px] font-semibold text-white shadow hover:bg-slate-800 disabled:bg-slate-400 disabled:cursor-not-allowed"
+                              className="w-full rounded-lg bg-pink-600 px-3 py-1.5 text-[11px] font-semibold text-white shadow hover:bg-pink-700 disabled:bg-slate-400 disabled:cursor-not-allowed"
                               onClick={() => addToCart(p)}
                             >
-                              {agotado
-                                ? "Sin existencias"
-                                : "Añadir al carrito"}
+                              {agotado ? "Sin existencias" : "Añadir al carrito"}
                             </button>
                           </div>
                         </div>
@@ -517,8 +424,7 @@ export default function OnlineStorePage() {
 
               {cart.length === 0 ? (
                 <p className="mt-2 text-xs text-slate-500">
-                  Aún no has agregado productos. Toca “Añadir al carrito” en el
-                  catálogo.
+                  Aún no has agregado productos. Toca “Añadir al carrito” en el catálogo.
                 </p>
               ) : (
                 <>
@@ -549,10 +455,7 @@ export default function OnlineStorePage() {
                               type="button"
                               className="h-6 w-6 rounded-full border border-slate-300 text-xs font-bold text-slate-700 hover:bg-slate-100"
                               onClick={() =>
-                                updateCartQuantity(
-                                  item.productId,
-                                  item.quantity - 1
-                                )
+                                updateCartQuantity(item.productId, item.quantity - 1)
                               }
                             >
                               -
@@ -575,10 +478,7 @@ export default function OnlineStorePage() {
                               type="button"
                               className="h-6 w-6 rounded-full border border-slate-300 text-xs font-bold text-slate-700 hover:bg-slate-100"
                               onClick={() =>
-                                updateCartQuantity(
-                                  item.productId,
-                                  item.quantity + 1
-                                )
+                                updateCartQuantity(item.productId, item.quantity + 1)
                               }
                             >
                               +
@@ -601,10 +501,7 @@ export default function OnlineStorePage() {
                     <div className="flex justify-between">
                       <span>Total productos:</span>
                       <span className="font-semibold">
-                        {cart.reduce(
-                          (acc, item) => acc + item.quantity,
-                          0
-                        )}
+                        {cart.reduce((acc, item) => acc + item.quantity, 0)}
                       </span>
                     </div>
 
@@ -635,7 +532,7 @@ export default function OnlineStorePage() {
                   </label>
                   <input
                     type="text"
-                    className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-[11px] outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                    className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-[11px] outline-none focus:border-pink-500 focus:ring-1 focus:ring-pink-500"
                     placeholder="Ej. Yanet"
                     value={customerName}
                     onChange={(e) => setCustomerName(e.target.value)}
@@ -648,15 +545,11 @@ export default function OnlineStorePage() {
                   </label>
                   <input
                     type="tel"
-                    className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-[11px] outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                    className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-[11px] outline-none focus:border-pink-500 focus:ring-1 focus:ring-pink-500"
                     placeholder="Ej. 971 123 45 67"
                     value={customerPhone}
                     onChange={(e) => setCustomerPhone(e.target.value)}
                   />
-                  <p className="mt-1 text-[10px] text-slate-500">
-                    Si lo capturas, también le enviaremos el pedido por
-                    WhatsApp.
-                  </p>
                 </div>
 
                 <div>
@@ -664,7 +557,7 @@ export default function OnlineStorePage() {
                     Dirección
                   </label>
                   <textarea
-                    className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-[11px] outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                    className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-[11px] outline-none focus:border-pink-500 focus:ring-1 focus:ring-pink-500"
                     placeholder="Calle, número, colonia..."
                     rows={2}
                     value={customerAddress}
@@ -678,15 +571,11 @@ export default function OnlineStorePage() {
                   </label>
                   <input
                     type="email"
-                    className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-[11px] outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                    className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-[11px] outline-none focus:border-pink-500 focus:ring-1 focus:ring-pink-500"
                     placeholder="Ej. cliente@correo.com"
                     value={customerEmail}
                     onChange={(e) => setCustomerEmail(e.target.value)}
                   />
-                  <p className="mt-1 text-[10px] text-slate-500">
-                    Te servirá para enviar promociones y seguimiento a tus
-                    clientes.
-                  </p>
                 </div>
               </div>
 
@@ -694,10 +583,10 @@ export default function OnlineStorePage() {
                 <button
                   type="button"
                   onClick={sendOrder}
-                  disabled={cart.length === 0 || sendingOrder}
+                  disabled={cart.length === 0}
                   className="flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white shadow hover:bg-emerald-700 disabled:bg-slate-400 disabled:cursor-not-allowed"
                 >
-                  {sendingOrder ? "Enviando pedido..." : "Enviar pedido"}
+                  Enviar pedido por WhatsApp
                 </button>
               </div>
             </aside>
