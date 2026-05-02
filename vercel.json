@@ -1,0 +1,34 @@
+{
+  "rewrites": [
+    {
+      "source": "/",
+      "destination": "/login",
+      "has": [
+        {
+          "type": "host",
+          "value": "pos.cosmetictenay.com"
+        }
+      ]
+    },
+    {
+      "source": "/",
+      "destination": "/tienda",
+      "has": [
+        {
+          "type": "host",
+          "value": "tienda.cosmetictenay.com"
+        }
+      ]
+    },
+    {
+      "source": "/",
+      "destination": "/reservas",
+      "has": [
+        {
+          "type": "host",
+          "value": "citas.cosmetictenay.com"
+        }
+      ]
+    }
+  ]
+}
