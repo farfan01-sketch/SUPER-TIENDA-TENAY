@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { sendEvolutionWhatsAppText } from "@/lib/evolutionWhatsapp";
 
 type OnlineOrderItem = {
   productId: string;
@@ -11,26 +12,59 @@ type OnlineOrderItem = {
 type OnlineOrder = {
   id: string;
   createdAt: string;
-
   customerName: string;
   customerPhone: string;
   customerAddress?: string;
   customerEmail?: string;
-
   items: OnlineOrderItem[];
   totalApprox: number;
-
   status: "pending" | "processed" | "cancelled";
-
-  // opcional: para ligar con la venta del POS
   linkedSaleId?: string;
 };
 
-// 🧠 almacenamiento en memoria (solo dev)
 const ONLINE_ORDERS: OnlineOrder[] = [];
 
 export async function GET() {
   return NextResponse.json(ONLINE_ORDERS, { status: 200 });
+}
+
+function formatProducts(items: OnlineOrderItem[]) {
+  return items
+    .map(
+      (item) =>
+        `- ${item.quantity} x ${item.name} = $${Number(item.subtotal || 0).toFixed(2)}`
+    )
+    .join("\n");
+}
+
+async function sendOnlineOrderWhatsApps(order: OnlineOrder) {
+  const adminPhone = process.env.ADMIN_WHATSAPP || "529712316195";
+  const productos = formatProducts(order.items);
+
+  const clienteMsg = `Hola ${order.customerName}, gracias por tu pedido.
+Pedido #${order.id}
+Productos:
+${productos}
+Total: $${Number(order.totalApprox || 0).toFixed(2)}
+En breve te contactaremos para confirmar pago y entrega.`;
+
+  const adminMsg = `🛒 NUEVO PEDIDO EN LÍNEA
+Cliente: ${order.customerName}
+Teléfono: ${order.customerPhone}
+Dirección: ${order.customerAddress || "No especificada"}
+Productos:
+${productos}
+Total: $${Number(order.totalApprox || 0).toFixed(2)}`;
+
+  await sendEvolutionWhatsAppText({
+    to: order.customerPhone,
+    text: clienteMsg,
+  });
+
+  await sendEvolutionWhatsAppText({
+    to: adminPhone,
+    text: adminMsg,
+  });
 }
 
 export async function POST(req: Request) {
@@ -46,7 +80,6 @@ export async function POST(req: Request) {
       );
     }
 
-    // Campos del cliente
     const customerName =
       body.customerName ||
       body.name ||
@@ -72,9 +105,7 @@ export async function POST(req: Request) {
       body.correo ||
       body.customer?.email;
 
-    // items puede venir como items, cart o products
-    const rawItems =
-      body.items || body.cart || body.products || [];
+    const rawItems = body.items || body.cart || body.products || [];
 
     if (!customerName || !customerPhone) {
       return NextResponse.json(
@@ -98,16 +129,11 @@ export async function POST(req: Request) {
 
     const items: OnlineOrderItem[] = rawItems
       .map((it: any) => {
-        const productId =
-          it.productId || it._id || it.id || "";
+        const productId = it.productId || it._id || it.id || "";
         const name = it.name || it.productName || "";
         const quantity = Number(it.quantity || 1);
-        const price =
-          Number(it.price) ||
-          Number(it.priceRetail) ||
-          0;
-        const subtotal =
-          Number(it.subtotal) || quantity * price;
+        const price = Number(it.price) || Number(it.priceRetail) || 0;
+        const subtotal = Number(it.subtotal) || quantity * price;
 
         if (!productId || !name) return null;
 
@@ -134,17 +160,11 @@ export async function POST(req: Request) {
     const totalApprox =
       typeof body.total === "number"
         ? Number(body.total)
-        : items.reduce(
-            (acc, it) =>
-              acc + Number(it.subtotal || 0),
-            0
-          );
+        : items.reduce((acc, it) => acc + Number(it.subtotal || 0), 0);
 
     const newOrder: OnlineOrder = {
       id: `WEB-${Date.now()}`,
-      createdAt:
-        body.createdAt ||
-        new Date().toISOString(),
+      createdAt: body.createdAt || new Date().toISOString(),
       customerName,
       customerPhone,
       customerAddress,
@@ -156,10 +176,16 @@ export async function POST(req: Request) {
 
     ONLINE_ORDERS.unshift(newOrder);
 
-    console.log(
-      "ONLINE ORDER guardado en memoria:",
-      newOrder.id
-    );
+    console.log("ONLINE ORDER guardado en memoria:", newOrder.id);
+
+    try {
+      await sendOnlineOrderWhatsApps(newOrder);
+    } catch (waError) {
+      console.error(
+        "[WhatsApp Pedido] Falló WhatsApp, pero el pedido quedó guardado:",
+        waError
+      );
+    }
 
     return NextResponse.json(
       {
@@ -169,21 +195,17 @@ export async function POST(req: Request) {
       { status: 201 }
     );
   } catch (err: any) {
-    console.error(
-      "Error en POST /api/online-orders:",
-      err
-    );
+    console.error("Error en POST /api/online-orders:", err);
+
     return NextResponse.json(
       {
-        message:
-          "Error interno al crear pedido en línea",
+        message: "Error interno al crear pedido en línea",
       },
       { status: 500 }
     );
   }
 }
 
-// 🔹 NUEVO: actualizar estado de un pedido (por ejemplo a "processed")
 export async function PATCH(req: Request) {
   try {
     const body = await req.json().catch(() => null);
@@ -206,9 +228,7 @@ export async function PATCH(req: Request) {
       linkedSaleId?: string;
     } = body;
 
-    const order = ONLINE_ORDERS.find(
-      (o) => o.id === id
-    );
+    const order = ONLINE_ORDERS.find((o) => o.id === id);
 
     if (!order) {
       return NextResponse.json(
@@ -233,14 +253,11 @@ export async function PATCH(req: Request) {
       { status: 200 }
     );
   } catch (err: any) {
-    console.error(
-      "Error en PATCH /api/online-orders:",
-      err
-    );
+    console.error("Error en PATCH /api/online-orders:", err);
+
     return NextResponse.json(
       {
-        message:
-          "Error interno al actualizar pedido",
+        message: "Error interno al actualizar pedido",
       },
       { status: 500 }
     );
