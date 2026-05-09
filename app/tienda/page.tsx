@@ -184,10 +184,6 @@ export default function OnlineStorePage() {
     [cart]
   );
 
-  function cleanPhone(phone: string): string {
-    return phone.replace(/\D/g, "");
-  }
-
   function buildOrderMessage() {
     let text = "*Nuevo pedido desde la tienda en línea – Cosmetic Tenay* 💄\n\n";
 
@@ -211,25 +207,52 @@ export default function OnlineStorePage() {
     return text;
   }
 
-  function sendOrder() {
+  async function sendOrder() {
     if (cart.length === 0) {
       alert("Tu carrito está vacío.");
       return;
     }
 
-    const storePhone = cleanPhone(STORE_WHATSAPP);
+    try {
+      const text = buildOrderMessage();
 
-    if (!storePhone) {
-      alert("Número de WhatsApp no configurado.");
-      return;
+      const response = await fetch("/api/whatsapp/send-order", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          to: STORE_WHATSAPP,
+          message: text,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        console.error("Error WhatsApp:", data);
+
+        alert(
+          data?.details?.response?.message ||
+            data?.error ||
+            "No se pudo enviar el pedido por WhatsApp."
+        );
+
+        return;
+      }
+
+      alert("Pedido enviado correctamente por WhatsApp ✅");
+
+      clearCart();
+
+      setCustomerName("");
+      setCustomerPhone("");
+      setCustomerAddress("");
+      setCustomerEmail("");
+    } catch (error) {
+      console.error("Error enviando pedido:", error);
+      alert("Error interno al enviar pedido.");
     }
-
-    const text = buildOrderMessage();
-    const whatsappUrl = `https://wa.me/${storePhone}?text=${encodeURIComponent(
-      text
-    )}`;
-
-    window.open(whatsappUrl, "_blank");
   }
 
   return (
@@ -266,7 +289,7 @@ export default function OnlineStorePage() {
             <div className="rounded-xl bg-pink-100/60 p-4 text-slate-900 shadow">
               <p className="font-semibold">¿Cómo funciona?</p>
               <p className="text-slate-700">
-                1) Elige tus productos · 2) Envía tu pedido por WhatsApp · 3) Confirmamos disponibilidad y forma de pago.
+                1) Elige tus productos · 2) Envía tu pedido · 3) Confirmamos disponibilidad y forma de pago.
               </p>
             </div>
           </div>
