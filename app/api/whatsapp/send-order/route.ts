@@ -37,10 +37,13 @@ export async function POST(req: NextRequest) {
 
 Gracias por tu pedido en Cosmetic Tenay 💄
 
-Tu pedido fue recibido correctamente.
-En breve te contactaremos para confirmar disponibilidad, forma de pago y entrega.
+Hemos recibido tu pedido con el siguiente detalle:
 
-¡Gracias por tu compra! ✨`;
+${adminMessage}
+
+En breve te contactaremos para confirmar disponibilidad, forma de pago y tiempo de entrega.
+
+¡Gracias por comprar en Cosmetic Tenay! ✨`;
 
       results.customer = await sendEvolutionWhatsAppText({
         to: customerPhone,
