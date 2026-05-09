@@ -224,6 +224,8 @@ export default function OnlineStorePage() {
         body: JSON.stringify({
           to: STORE_WHATSAPP,
           message: text,
+          customerPhone: customerPhone,
+          customerName: customerName,
         }),
       });
 

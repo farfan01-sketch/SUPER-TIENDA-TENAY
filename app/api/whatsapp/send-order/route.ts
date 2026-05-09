@@ -7,65 +7,58 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
 
-    const to = body?.to || "";
-    const message = body?.message || "";
+    const adminPhone = body?.to || "";
+    const adminMessage = body?.message || "";
 
     const customerPhone = body?.customerPhone || "";
     const customerName = body?.customerName || "Cliente";
 
-    if (!to || !message) {
+    if (!adminPhone || !adminMessage) {
       return NextResponse.json(
         { error: "Faltan 'to' o 'message' en el cuerpo" },
         { status: 400 }
       );
     }
 
-    // =========================
-    // MENSAJE AL ADMIN
-    // =========================
-    const adminResult = await sendEvolutionWhatsAppText({
-      to,
-      text: message,
+    const results: any = {
+      admin: null,
+      customer: null,
+    };
+
+    // Mensaje al administrador
+    results.admin = await sendEvolutionWhatsAppText({
+      to: adminPhone,
+      text: adminMessage,
     });
 
-    // =========================
-    // MENSAJE AL CLIENTE
-    // =========================
+    // Mensaje al cliente
     if (customerPhone) {
       const customerMessage = `Hola ${customerName} 👋
 
 Gracias por tu pedido en Cosmetic Tenay 💄
 
-Tu pedido fue recibido correctamente y en breve te contactaremos para confirmar disponibilidad, pago y entrega.
+Tu pedido fue recibido correctamente.
+En breve te contactaremos para confirmar disponibilidad, forma de pago y entrega.
 
 ¡Gracias por tu compra! ✨`;
 
-      await sendEvolutionWhatsAppText({
+      results.customer = await sendEvolutionWhatsAppText({
         to: customerPhone,
         text: customerMessage,
       });
     }
 
-    if (!adminResult.success) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "No se pudo enviar WhatsApp",
-          details: adminResult.error,
-        },
-        { status: 500 }
-      );
-    }
-
     return NextResponse.json({
       ok: true,
       provider: "evolution-api",
+      results,
     });
   } catch (err: any) {
     console.error("[send-order Evolution] Error interno:", err);
 
     return NextResponse.json(
       {
+        ok: false,
         error: "Error interno",
         message: String(err?.message || err),
       },
