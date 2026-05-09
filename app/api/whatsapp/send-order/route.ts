@@ -6,8 +6,12 @@ export const runtime = "nodejs";
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
+
     const to = body?.to || "";
     const message = body?.message || "";
+
+    const customerPhone = body?.customerPhone || "";
+    const customerName = body?.customerName || "Cliente";
 
     if (!to || !message) {
       return NextResponse.json(
@@ -16,17 +20,38 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const result = await sendEvolutionWhatsAppText({
+    // =========================
+    // MENSAJE AL ADMIN
+    // =========================
+    const adminResult = await sendEvolutionWhatsAppText({
       to,
       text: message,
     });
 
-    if (!result.success) {
+    // =========================
+    // MENSAJE AL CLIENTE
+    // =========================
+    if (customerPhone) {
+      const customerMessage = `Hola ${customerName} 👋
+
+Gracias por tu pedido en Cosmetic Tenay 💄
+
+Tu pedido fue recibido correctamente y en breve te contactaremos para confirmar disponibilidad, pago y entrega.
+
+¡Gracias por tu compra! ✨`;
+
+      await sendEvolutionWhatsAppText({
+        to: customerPhone,
+        text: customerMessage,
+      });
+    }
+
+    if (!adminResult.success) {
       return NextResponse.json(
         {
           ok: false,
-          error: "No se pudo enviar WhatsApp por Evolution API",
-          details: result.error,
+          error: "No se pudo enviar WhatsApp",
+          details: adminResult.error,
         },
         { status: 500 }
       );
@@ -35,7 +60,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       ok: true,
       provider: "evolution-api",
-      data: result.data,
     });
   } catch (err: any) {
     console.error("[send-order Evolution] Error interno:", err);
