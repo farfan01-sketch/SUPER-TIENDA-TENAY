@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { connectDB } from "@/lib/db";
+import { OnlineOrder } from "@/models/OnlineOrder";
 import { sendEvolutionWhatsAppText } from "@/lib/evolutionWhatsapp";
 
 type OnlineOrderItem = {
@@ -9,40 +11,23 @@ type OnlineOrderItem = {
   subtotal: number;
 };
 
-type OnlineOrder = {
-  id: string;
-  createdAt: string;
-  customerName: string;
-  customerPhone: string;
-  customerAddress?: string;
-  customerEmail?: string;
-  items: OnlineOrderItem[];
-  totalApprox: number;
-  status: "pending" | "processed" | "cancelled";
-  linkedSaleId?: string;
-};
-
-const ONLINE_ORDERS: OnlineOrder[] = [];
-
-export async function GET() {
-  return NextResponse.json(ONLINE_ORDERS, { status: 200 });
-}
-
 function formatProducts(items: OnlineOrderItem[]) {
   return items
     .map(
       (item) =>
-        `- ${item.quantity} x ${item.name} = $${Number(item.subtotal || 0).toFixed(2)}`
+        `- ${item.quantity} x ${item.name} = $${Number(
+          item.subtotal || 0
+        ).toFixed(2)}`
     )
     .join("\n");
 }
 
-async function sendOnlineOrderWhatsApps(order: OnlineOrder) {
+async function sendOnlineOrderWhatsApps(order: any) {
   const adminPhone = process.env.ADMIN_WHATSAPP || "529712316195";
   const productos = formatProducts(order.items);
 
   const clienteMsg = `Hola ${order.customerName}, gracias por tu pedido.
-Pedido #${order.id}
+Pedido #${order.folio}
 Productos:
 ${productos}
 Total: $${Number(order.totalApprox || 0).toFixed(2)}
@@ -67,8 +52,44 @@ Total: $${Number(order.totalApprox || 0).toFixed(2)}`;
   });
 }
 
+export async function GET() {
+  try {
+    await connectDB();
+
+    const orders = await OnlineOrder.find({
+      status: "pending",
+    })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const formatted = orders.map((order: any) => ({
+      id: order.folio,
+      createdAt: order.createdAt,
+      customerName: order.customerName,
+      customerPhone: order.customerPhone,
+      customerAddress: order.customerAddress,
+      customerEmail: order.customerEmail,
+      items: order.items,
+      totalApprox: order.totalApprox,
+      status: order.status,
+      linkedSaleId: order.linkedSaleId,
+    }));
+
+    return NextResponse.json(formatted, { status: 200 });
+  } catch (err) {
+    console.error("Error en GET /api/online-orders:", err);
+
+    return NextResponse.json(
+      { message: "Error al cargar pedidos en línea" },
+      { status: 500 }
+    );
+  }
+}
+
 export async function POST(req: Request) {
   try {
+    await connectDB();
+
     const body = await req.json().catch(() => null);
 
     console.log("ONLINE ORDER BODY recibido:", body);
@@ -121,7 +142,7 @@ export async function POST(req: Request) {
       return NextResponse.json(
         {
           message:
-            "El pedido no contiene productos válidos (items/cart/products vacío).",
+            "El pedido no contiene productos válidos.",
         },
         { status: 400 }
       );
@@ -151,7 +172,7 @@ export async function POST(req: Request) {
       return NextResponse.json(
         {
           message:
-            "No se pudieron mapear productos del pedido. Revisa la estructura enviada.",
+            "No se pudieron mapear productos del pedido.",
         },
         { status: 400 }
       );
@@ -162,9 +183,10 @@ export async function POST(req: Request) {
         ? Number(body.total)
         : items.reduce((acc, it) => acc + Number(it.subtotal || 0), 0);
 
-    const newOrder: OnlineOrder = {
-      id: `WEB-${Date.now()}`,
-      createdAt: body.createdAt || new Date().toISOString(),
+    const folio = `WEB-${Date.now()}`;
+
+    const newOrder = await OnlineOrder.create({
+      folio,
       customerName,
       customerPhone,
       customerAddress,
@@ -172,11 +194,7 @@ export async function POST(req: Request) {
       items,
       totalApprox,
       status: "pending",
-    };
-
-    ONLINE_ORDERS.unshift(newOrder);
-
-    console.log("ONLINE ORDER guardado en memoria:", newOrder.id);
+    });
 
     try {
       await sendOnlineOrderWhatsApps(newOrder);
@@ -190,11 +208,21 @@ export async function POST(req: Request) {
     return NextResponse.json(
       {
         message: "Pedido en línea creado correctamente",
-        order: newOrder,
+        order: {
+          id: newOrder.folio,
+          createdAt: newOrder.createdAt,
+          customerName: newOrder.customerName,
+          customerPhone: newOrder.customerPhone,
+          customerAddress: newOrder.customerAddress,
+          customerEmail: newOrder.customerEmail,
+          items: newOrder.items,
+          totalApprox: newOrder.totalApprox,
+          status: newOrder.status,
+        },
       },
       { status: 201 }
     );
-  } catch (err: any) {
+  } catch (err) {
     console.error("Error en POST /api/online-orders:", err);
 
     return NextResponse.json(
@@ -208,8 +236,9 @@ export async function POST(req: Request) {
 
 export async function PATCH(req: Request) {
   try {
+    await connectDB();
+
     const body = await req.json().catch(() => null);
-    console.log("PATCH /api/online-orders BODY:", body);
 
     if (!body || !body.id) {
       return NextResponse.json(
@@ -218,17 +247,7 @@ export async function PATCH(req: Request) {
       );
     }
 
-    const {
-      id,
-      status,
-      linkedSaleId,
-    }: {
-      id: string;
-      status?: OnlineOrder["status"];
-      linkedSaleId?: string;
-    } = body;
-
-    const order = ONLINE_ORDERS.find((o) => o.id === id);
+    const order = await OnlineOrder.findOne({ folio: body.id });
 
     if (!order) {
       return NextResponse.json(
@@ -237,13 +256,15 @@ export async function PATCH(req: Request) {
       );
     }
 
-    if (status) {
-      order.status = status;
+    if (body.status) {
+      order.status = body.status;
     }
 
-    if (linkedSaleId) {
-      order.linkedSaleId = linkedSaleId;
+    if (body.linkedSaleId) {
+      order.linkedSaleId = body.linkedSaleId;
     }
+
+    await order.save();
 
     return NextResponse.json(
       {
@@ -252,7 +273,7 @@ export async function PATCH(req: Request) {
       },
       { status: 200 }
     );
-  } catch (err: any) {
+  } catch (err) {
     console.error("Error en PATCH /api/online-orders:", err);
 
     return NextResponse.json(
